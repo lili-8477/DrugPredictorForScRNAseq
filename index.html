@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DrugReflector - Phenotypic Drug Discovery</title>
+    <meta name="description"
+        content="Automated phenotypic drug discovery application using single-cell RNA-seq data and DrugReflector neural network models.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <div class="logo-icon">
+                        <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="16" cy="16" r="14" stroke="url(#gradient)" stroke-width="2" />
+                            <circle cx="16" cy="10" r="3" fill="url(#gradient)" />
+                            <circle cx="10" cy="20" r="3" fill="url(#gradient)" />
+                            <circle cx="22" cy="20" r="3" fill="url(#gradient)" />
+                            <line x1="16" y1="13" x2="11" y2="18" stroke="url(#gradient)" stroke-width="1.5" />
+                            <line x1="16" y1="13" x2="21" y2="18" stroke="url(#gradient)" stroke-width="1.5" />
+                            <line x1="13" y1="20" x2="19" y2="20" stroke="url(#gradient)" stroke-width="1.5" />
+                            <defs>
+                                <linearGradient id="gradient" x1="0" y1="0" x2="32" y2="32">
+                                    <stop offset="0%" stop-color="#6366f1" />
+                                    <stop offset="100%" stop-color="#22d3ee" />
+                                </linearGradient>
+                            </defs>
+                        </svg>
+                    </div>
+                    <div class="logo-text">
+                        <h1>DrugReflector</h1>
+                        <span class="subtitle">Phenotypic Drug Discovery</span>
+                    </div>
+                </div>
+                <div class="header-status" id="headerStatus">
+                    <span class="status-indicator loading"></span>
+                    <span class="status-text">Checking system...</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Step 1: Upload -->
+            <section class="step-section" id="uploadSection">
+                <div class="step-header">
+                    <div class="step-number">1</div>
+                    <div class="step-info">
+                        <h2>Upload Data</h2>
+                        <p>Upload your single-cell RNA-seq data in AnnData format (.h5ad)</p>
+                    </div>
+                </div>
+
+                <div class="upload-zone" id="uploadZone">
+                    <div class="upload-content">
+                        <div class="upload-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="1.5">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="17,8 12,3 7,8" />
+                                <line x1="12" y1="3" x2="12" y2="15" />
+                            </svg>
+                        </div>
+                        <p class="upload-text">Drag & drop your .h5ad file here</p>
+                        <p class="upload-subtext">or click to browse</p>
+                        <input type="file" id="fileInput" accept=".h5ad" hidden>
+                    </div>
+                    <div class="upload-progress" id="uploadProgress" hidden>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                        <span class="progress-text" id="progressText">Uploading...</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 2: Metadata & Selection -->
+            <section class="step-section" id="metadataSection" hidden>
+                <div class="step-header">
+                    <div class="step-number">2</div>
+                    <div class="step-info">
+                        <h2>Configure Analysis</h2>
+                        <p>Review metadata and select cell populations for comparison</p>
+                    </div>
+                </div>
+
+                <div class="metadata-grid">
+                    <!-- Data Summary Card -->
+                    <div class="card metadata-card">
+                        <div class="card-header">
+                            <h3>Data Summary</h3>
+                            <span class="file-badge" id="filenameBadge">filename.h5ad</span>
+                        </div>
+                        <div class="card-content">
+                            <div class="stat-grid">
+                                <div class="stat-item">
+                                    <span class="stat-value" id="cellCount">-</span>
+                                    <span class="stat-label">Cells</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="geneCount">-</span>
+                                    <span class="stat-label">Genes</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="normStatus">-</span>
+                                    <span class="stat-label">Normalization</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Selection Card -->
+                    <div class="card selection-card">
+                        <div class="card-header">
+                            <h3>Cell Population Selection</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="form-group">
+                                <label for="groupCol">Group Column</label>
+                                <select id="groupCol" class="select-input">
+                                    <option value="">Select column...</option>
+                                </select>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="sourceGroup">Source (Baseline)</label>
+                                    <select id="sourceGroup" class="select-input" disabled>
+                                        <option value="">Select group...</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="targetGroup">Target (Desired State)</label>
+                                    <select id="targetGroup" class="select-input" disabled>
+                                        <option value="">Select group...</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="transition-indicator" id="transitionIndicator" hidden>
+                                <span class="source-label" id="sourceLabel">Source</span>
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <line x1="5" y1="12" x2="19" y2="12" />
+                                    <polyline points="12,5 19,12 12,19" />
+                                </svg>
+                                <span class="target-label" id="targetLabel">Target</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-bar">
+                    <button class="btn btn-secondary" id="resetBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                            <path d="M3 3v5h5" />
+                        </svg>
+                        Reset
+                    </button>
+                    <button class="btn btn-primary" id="analyzeBtn" disabled>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polygon points="5,3 19,12 5,21" />
+                        </svg>
+                        Run Analysis
+                    </button>
+                </div>
+            </section>
+
+            <!-- Step 3: Results -->
+            <section class="step-section" id="resultsSection" hidden>
+                <div class="step-header">
+                    <div class="step-number">3</div>
+                    <div class="step-info">
+                        <h2>Compound Predictions</h2>
+                        <p id="resultsSummary">Ranked compounds that may induce the desired state transition</p>
+                    </div>
+                </div>
+
+                <!-- V-Score Summary -->
+                <div class="card vscore-card" id="vscoreCard">
+                    <div class="card-header">
+                        <h3>Differential Expression Summary</h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="vscore-grid">
+                            <div class="vscore-section">
+                                <h4>Top Upregulated Genes</h4>
+                                <ul class="gene-list" id="upregulatedGenes"></ul>
+                            </div>
+                            <div class="vscore-section">
+                                <h4>Top Downregulated Genes</h4>
+                                <ul class="gene-list" id="downregulatedGenes"></ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results Table -->
+                <div class="card results-card">
+                    <div class="card-header">
+                        <h3>Ranked Compounds</h3>
+                        <div class="card-actions">
+                            <button class="btn btn-icon" id="exportCsvBtn" title="Export CSV">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="7,10 12,15 17,10" />
+                                    <line x1="12" y1="15" x2="12" y2="3" />
+                                </svg>
+                                Export CSV
+                            </button>
+                            <button class="btn btn-icon" id="exportJsonBtn" title="Export JSON">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                    <polyline points="14,2 14,8 20,8" />
+                                </svg>
+                                Export JSON
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <div class="table-container">
+                            <table class="results-table" id="resultsTable">
+                                <thead>
+                                    <tr>
+                                        <th class="sortable" data-sort="rank">Rank</th>
+                                        <th class="sortable" data-sort="compound">Compound</th>
+                                        <th class="sortable" data-sort="probability">Probability</th>
+                                        <th>Score</th>
+                                        <th>iLINCS</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="resultsBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-bar">
+                    <button class="btn btn-secondary" id="newAnalysisBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19" />
+                            <line x1="5" y1="12" x2="19" y2="12" />
+                        </svg>
+                        New Analysis
+                    </button>
+                </div>
+            </section>
+
+            <!-- Loading Overlay -->
+            <div class="loading-overlay" id="loadingOverlay" hidden>
+                <div class="loading-content">
+                    <div class="loading-spinner"></div>
+                    <h3 id="loadingTitle">Processing...</h3>
+                    <p id="loadingMessage">Running DrugReflector analysis</p>
+                </div>
+            </div>
+
+            <!-- Error Toast -->
+            <div class="toast error-toast" id="errorToast" hidden>
+                <div class="toast-content">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="15" y1="9" x2="9" y2="15" />
+                        <line x1="9" y1="9" x2="15" y2="15" />
+                    </svg>
+                    <span id="errorMessage">An error occurred</span>
+                </div>
+                <button class="toast-close" id="closeToast">&times;</button>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>DrugReflector Automation MVP | Powered by <a href="https://github.com/Cellarity/drugreflector"
+                    target="_blank">Cellarity DrugReflector</a></p>
+        </footer>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+
+</html>
