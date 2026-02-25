@@ -6,6 +6,8 @@ This package contains modular components for:
 - DrugReflector prediction pipeline
 - iLINCS URL generation
 - File and checkpoint validation
+- Doublet detection using Scrublet
+- Cell type annotation using CellTypist
 """
 
 from .metadata import (
@@ -31,6 +33,19 @@ from .validation import (
     validate_group_column
 )
 
+from .doublet_detection import (
+    run_scrublet,
+    filter_doublets
+)
+
+from .annotation import (
+    get_available_models,
+    run_celltypist,
+    CELLTYPIST_MODELS
+)
+
+from .umap import compute_umap
+
 __all__ = [
     # Metadata
     'convert_to_json_serializable',
@@ -49,4 +64,13 @@ __all__ = [
     'allowed_file',
     'check_checkpoints_exist',
     'validate_group_column',
+    # Doublet detection
+    'run_scrublet',
+    'filter_doublets',
+    # Annotation
+    'get_available_models',
+    'run_celltypist',
+    'CELLTYPIST_MODELS',
+    # UMAP
+    'compute_umap',
 ]

@@ -1,8 +1,11 @@
 """
 DrugReflector Automation MVP - Flask Backend
-Automated phenotypic drug discovery application
+Automated phenotypic drug discovery application with upstream
+single-cell RNA-seq preprocessing, QC, and cell type annotation.
 """
 import os
+import atexit
+import glob
 import uuid
 import traceback
 from flask import Flask, request, jsonify, send_from_directory
@@ -32,6 +35,33 @@ CORS(app)
 file_store = {}
 
 
+def cleanup_all_uploads():
+    """Remove all uploaded files from disk and clear file_store."""
+    # Clean tracked files
+    for file_id, info in list(file_store.items()):
+        filepath = info.get('filepath')
+        if filepath and os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except OSError:
+                pass
+    file_store.clear()
+
+    # Clean any untracked files left in uploads/
+    for f in glob.glob(os.path.join(UPLOAD_FOLDER, '*.h5ad')):
+        try:
+            os.remove(f)
+        except OSError:
+            pass
+
+
+# Purge stale uploads from previous sessions on startup
+cleanup_all_uploads()
+
+# Clean up on server shutdown
+atexit.register(cleanup_all_uploads)
+
+
 # ============== API Endpoints ==============
 
 @app.route('/')
@@ -48,7 +78,7 @@ def serve_static(path):
 def get_status():
     """Get application status and check dependencies"""
     checkpoints_ok, missing = check_checkpoints_exist()
-    
+
     # Check if drugreflector is available
     try:
         import drugreflector
@@ -57,7 +87,7 @@ def get_status():
     except ImportError:
         dr_available = False
         dr_version = None
-    
+
     # Check if scanpy is available
     try:
         import scanpy
@@ -66,7 +96,25 @@ def get_status():
     except ImportError:
         scanpy_available = False
         scanpy_version = None
-    
+
+    # Check if scrublet is available
+    try:
+        import scrublet
+        scrublet_available = True
+        scrublet_version = getattr(scrublet, '__version__', 'unknown')
+    except ImportError:
+        scrublet_available = False
+        scrublet_version = None
+
+    # Check if celltypist is available
+    try:
+        import celltypist
+        celltypist_available = True
+        celltypist_version = getattr(celltypist, '__version__', 'unknown')
+    except ImportError:
+        celltypist_available = False
+        celltypist_version = None
+
     return jsonify({
         'status': 'ok' if (checkpoints_ok and dr_available) else 'incomplete',
         'drugreflector': {
@@ -76,6 +124,14 @@ def get_status():
         'scanpy': {
             'available': scanpy_available,
             'version': scanpy_version
+        },
+        'scrublet': {
+            'available': scrublet_available,
+            'version': scrublet_version
+        },
+        'celltypist': {
+            'available': celltypist_available,
+            'version': celltypist_version
         },
         'checkpoints': {
             'available': checkpoints_ok,
@@ -89,29 +145,29 @@ def upload_file():
     """Handle file upload"""
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
-    
+
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
-    
+
     if not allowed_file(file.filename):
         return jsonify({'error': 'Invalid file type. Only .h5ad files are allowed'}), 400
-    
+
     # Generate unique file ID
     file_id = str(uuid.uuid4())
     filename = secure_filename(file.filename)
     filepath = os.path.join(UPLOAD_FOLDER, f"{file_id}_{filename}")
-    
+
     # Save file
     file.save(filepath)
-    
+
     # Store file info
     file_store[file_id] = {
         'filename': filename,
         'filepath': filepath,
         'uploaded_at': pd.Timestamp.now().isoformat()
     }
-    
+
     return jsonify({
         'file_id': file_id,
         'filename': filename,
@@ -123,41 +179,417 @@ def get_metadata(file_id):
     """Extract and return AnnData metadata"""
     if file_id not in file_store:
         return jsonify({'error': 'File not found'}), 404
-    
+
     filepath = file_store[file_id]['filepath']
-    
+
     try:
         import anndata as ad
-        
+
         # Load AnnData
         adata = ad.read_h5ad(filepath)
-        
+
         # Extract metadata using utility function
         metadata = extract_metadata(adata, file_id, file_store[file_id]['filename'])
-        
+
         return jsonify(metadata)
-    
+
     except Exception as e:
         return jsonify({
             'error': f'Failed to read file: {str(e)}',
             'traceback': traceback.format_exc()
         }), 500
 
+
+# ============== Quality Control Endpoints ==============
+
+@app.route('/api/doublet-detection', methods=['POST'])
+def run_doublet_detection():
+    """Run Scrublet doublet detection on uploaded data"""
+    data = request.get_json()
+    file_id = data.get('file_id')
+
+    if not file_id or file_id not in file_store:
+        return jsonify({'error': 'File not found'}), 404
+
+    filepath = file_store[file_id]['filepath']
+    expected_rate = data.get('expected_doublet_rate', 0.06)
+
+    try:
+        import anndata as ad
+        from utils.doublet_detection import run_scrublet
+
+        # Load AnnData
+        adata = ad.read_h5ad(filepath)
+
+        # Run Scrublet
+        results = run_scrublet(adata, expected_doublet_rate=expected_rate)
+
+        # Save modified AnnData back (with doublet scores in .obs)
+        adata.write_h5ad(filepath)
+
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+
+    except ImportError as e:
+        return jsonify({
+            'error': f'Missing dependency: {str(e)}',
+            'instructions': 'Install with: pip install scrublet'
+        }), 500
+
+    except Exception as e:
+        return jsonify({
+            'error': f'Doublet detection failed: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/api/filter-doublets', methods=['POST'])
+def filter_doublets_endpoint():
+    """Filter out detected doublets from the data"""
+    data = request.get_json()
+    file_id = data.get('file_id')
+
+    if not file_id or file_id not in file_store:
+        return jsonify({'error': 'File not found'}), 404
+
+    filepath = file_store[file_id]['filepath']
+
+    try:
+        import anndata as ad
+        from utils.doublet_detection import filter_doublets
+
+        # Load AnnData
+        adata = ad.read_h5ad(filepath)
+
+        # Filter doublets
+        adata_filtered, n_removed = filter_doublets(adata)
+
+        # Save filtered data back
+        adata_filtered.write_h5ad(filepath)
+
+        # Re-extract metadata with updated cell count
+        metadata = extract_metadata(adata_filtered, file_id, file_store[file_id]['filename'])
+
+        return jsonify({
+            'success': True,
+            'n_removed': n_removed,
+            'n_remaining': int(adata_filtered.n_obs),
+            'metadata': metadata
+        })
+
+    except Exception as e:
+        return jsonify({
+            'error': f'Doublet filtering failed: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+# ============== Cell Type Annotation Endpoints ==============
+
+@app.route('/api/celltypist-models', methods=['GET'])
+def get_celltypist_models():
+    """Get list of available CellTypist models"""
+    from utils.annotation import get_available_models
+    return jsonify({'models': get_available_models()})
+
+@app.route('/api/annotate', methods=['POST'])
+def run_annotation():
+    """Run CellTypist cell type annotation"""
+    data = request.get_json()
+    file_id = data.get('file_id')
+
+    if not file_id or file_id not in file_store:
+        return jsonify({'error': 'File not found'}), 404
+
+    filepath = file_store[file_id]['filepath']
+    model_name = data.get('model', 'Immune_All_Low.pkl')
+    majority_voting = data.get('majority_voting', True)
+
+    try:
+        import anndata as ad
+        from utils.annotation import run_celltypist
+
+        # Load AnnData
+        adata = ad.read_h5ad(filepath)
+
+        # Run CellTypist annotation
+        results = run_celltypist(
+            adata,
+            model_name=model_name,
+            majority_voting=majority_voting
+        )
+
+        # Save annotated data back (with cell type labels in .obs)
+        adata.write_h5ad(filepath)
+
+        # Re-extract metadata (new annotation columns now available for group selection)
+        metadata = extract_metadata(adata, file_id, file_store[file_id]['filename'])
+
+        return jsonify({
+            'success': True,
+            'results': results,
+            'metadata': metadata
+        })
+
+    except ImportError as e:
+        return jsonify({
+            'error': f'Missing dependency: {str(e)}',
+            'instructions': 'Install with: pip install celltypist'
+        }), 500
+
+    except Exception as e:
+        return jsonify({
+            'error': f'Annotation failed: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/api/annotation-columns/<file_id>', methods=['GET'])
+def get_annotation_columns(file_id):
+    """Get categorical columns from adata.obs suitable as training labels"""
+    if file_id not in file_store:
+        return jsonify({'error': 'File not found'}), 404
+
+    filepath = file_store[file_id]['filepath']
+
+    try:
+        import anndata as ad
+        from utils.annotation import get_annotation_columns as _get_cols
+
+        adata = ad.read_h5ad(filepath)
+        columns = _get_cols(adata)
+
+        return jsonify({'columns': columns})
+
+    except Exception as e:
+        return jsonify({
+            'error': f'Failed to get annotation columns: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/api/train-model', methods=['POST'])
+def train_model():
+    """Train a custom CellTypist model from user-selected labels"""
+    data = request.get_json()
+    file_id = data.get('file_id')
+
+    if not file_id or file_id not in file_store:
+        return jsonify({'error': 'File not found'}), 404
+
+    labels_column = data.get('labels_column')
+    model_name = data.get('model_name')
+
+    if not labels_column:
+        return jsonify({'error': 'labels_column is required'}), 400
+    if not model_name:
+        return jsonify({'error': 'model_name is required'}), 400
+
+    filepath = file_store[file_id]['filepath']
+    feature_selection = data.get('feature_selection', True)
+    top_genes = data.get('top_genes', 300)
+    epochs = data.get('epochs', 10)
+    use_SGD = data.get('use_SGD', True)
+    max_cells = data.get('max_cells')
+    subset_column = data.get('subset_column')
+    subset_values = data.get('subset_values')
+
+    # Validate max_cells
+    if max_cells is not None:
+        try:
+            max_cells = int(max_cells)
+            if max_cells < 1:
+                max_cells = None
+        except (ValueError, TypeError):
+            max_cells = None
+
+    try:
+        import anndata as ad
+        from utils.annotation import train_celltypist_model
+
+        adata = ad.read_h5ad(filepath)
+
+        results = train_celltypist_model(
+            adata,
+            labels_column=labels_column,
+            model_name=model_name,
+            feature_selection=feature_selection,
+            top_genes=top_genes,
+            epochs=epochs,
+            use_SGD=use_SGD,
+            max_cells=max_cells,
+            subset_column=subset_column,
+            subset_values=subset_values
+        )
+
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+
+    except ImportError as e:
+        return jsonify({
+            'error': f'Missing dependency: {str(e)}',
+            'instructions': 'Install with: pip install celltypist'
+        }), 500
+
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+    except Exception as e:
+        return jsonify({
+            'error': f'Model training failed: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/api/custom-models', methods=['GET'])
+def list_custom_models():
+    """Get list of user-trained custom models"""
+    from utils.annotation import get_custom_models
+    return jsonify({'models': get_custom_models()})
+
+
+# ============== UMAP Visualization Endpoints ==============
+
+@app.route('/api/umap', methods=['POST'])
+def run_umap():
+    """Compute UMAP embedding for visualization"""
+    data = request.get_json()
+    file_id = data.get('file_id')
+
+    if not file_id or file_id not in file_store:
+        return jsonify({'error': 'File not found'}), 404
+
+    filepath = file_store[file_id]['filepath']
+    force_recompute = data.get('force_recompute', False)
+
+    try:
+        import anndata as ad
+        from utils.umap import compute_umap
+
+        # Load AnnData
+        adata = ad.read_h5ad(filepath)
+
+        # Compute UMAP (returns result dict and potentially modified adata)
+        results, adata = compute_umap(adata, force_recompute=force_recompute)
+
+        # Save modified AnnData back (with UMAP coords in .obsm)
+        adata.write_h5ad(filepath)
+
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+
+    except ImportError as e:
+        return jsonify({
+            'error': f'Missing dependency: {str(e)}',
+            'instructions': 'Install with: pip install scanpy'
+        }), 500
+
+    except Exception as e:
+        return jsonify({
+            'error': f'UMAP computation failed: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+@app.route('/api/gene-expression', methods=['POST'])
+def get_gene_expression():
+    """Get expression values for a single gene across all cells"""
+    data = request.get_json()
+    file_id = data.get('file_id')
+    gene = data.get('gene')
+
+    if not file_id or file_id not in file_store:
+        return jsonify({'error': 'File not found'}), 404
+
+    if not gene:
+        return jsonify({'error': 'No gene specified'}), 400
+
+    filepath = file_store[file_id]['filepath']
+
+    try:
+        import anndata as ad
+        import numpy as np
+
+        adata = ad.read_h5ad(filepath)
+
+        if gene not in adata.var_names:
+            return jsonify({'error': f'Gene "{gene}" not found in dataset'}), 404
+
+        # Extract expression for this gene
+        expr = adata[:, gene].X
+        if hasattr(expr, 'toarray'):
+            expr = expr.toarray()
+        values = np.asarray(expr).flatten()
+        values = np.nan_to_num(values, nan=0.0).tolist()
+
+        return jsonify({
+            'success': True,
+            'gene': gene,
+            'values': values
+        })
+
+    except Exception as e:
+        return jsonify({
+            'error': f'Failed to get gene expression: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+@app.route('/api/gene-search', methods=['POST'])
+def search_genes():
+    """Search for gene names matching a query string"""
+    data = request.get_json()
+    file_id = data.get('file_id')
+    query = data.get('query', '').strip()
+
+    if not file_id or file_id not in file_store:
+        return jsonify({'error': 'File not found'}), 404
+
+    if len(query) < 1:
+        return jsonify({'genes': []})
+
+    filepath = file_store[file_id]['filepath']
+
+    try:
+        import anndata as ad
+
+        adata = ad.read_h5ad(filepath, backed='r')
+        gene_names = list(adata.var_names)
+        adata.file.close()
+
+        query_upper = query.upper()
+        # Exact prefix matches first, then substring matches
+        prefix = [g for g in gene_names if g.upper().startswith(query_upper)]
+        substring = [g for g in gene_names if query_upper in g.upper() and g not in prefix]
+        matches = (prefix + substring)[:20]
+
+        return jsonify({'genes': matches})
+
+    except Exception as e:
+        return jsonify({
+            'error': f'Gene search failed: {str(e)}'
+        }), 500
+
+
+# ============== Drug Prediction Endpoints ==============
+
 @app.route('/api/analyze', methods=['POST'])
 def analyze():
     """Run the full DrugReflector analysis pipeline"""
     data = request.get_json()
-    
+
     # Validate required fields
     required_fields = ['file_id', 'group_col', 'source_group', 'target_group']
     for field in required_fields:
         if field not in data:
             return jsonify({'error': f'Missing required field: {field}'}), 400
-    
+
     file_id = data['file_id']
     if file_id not in file_store:
         return jsonify({'error': 'File not found'}), 404
-    
+
     # Check if checkpoints exist
     checkpoints_ok, missing = check_checkpoints_exist()
     if not checkpoints_ok:
@@ -166,27 +598,27 @@ def analyze():
             'missing_files': missing,
             'instructions': f'Please download checkpoints from Zenodo (DOI: 10.5281/zenodo.16912444) and place them in {CHECKPOINT_DIR}'
         }), 500
-    
+
     filepath = file_store[file_id]['filepath']
     group_col = data['group_col']
     source_group = data['source_group']
     target_group = data['target_group']
     n_top = data.get('n_top', 50)
-    
+
     try:
         import anndata as ad
-        
+
         # Step 1: Load AnnData
         adata = ad.read_h5ad(filepath)
-        
+
         # Step 2: Validate group column and groups
         valid, error_msg = validate_group_column(adata, group_col, source_group, target_group)
         if not valid:
             return jsonify({'error': error_msg}), 400
-        
+
         # Step 3: Preprocessing
         adata, preprocessing_steps = preprocess_adata(adata)
-        
+
         # Step 4: Compute v-scores
         vscores = compute_vscores_adata(
             adata,
@@ -194,16 +626,16 @@ def analyze():
             group1_value=source_group,
             group2_value=target_group
         )
-        
+
         # Generate v-score summary
         vscore_summary = get_vscore_summary(vscores)
-        
+
         # Step 5: Run DrugReflector prediction
         predictions = run_drugreflector_prediction(vscores, CHECKPOINT_PATHS, n_top=n_top)
-        
+
         # Step 6: Format results (including iLINCS URLs)
         results_df = format_prediction_results(predictions, vscores, n_top=n_top)
-        
+
         # Step 7: Cleanup uploaded file to save disk space
         filepath = file_store.get(file_id, {}).get('filepath')
         if filepath and os.path.exists(filepath):
@@ -211,7 +643,7 @@ def analyze():
             print(f"Cleaned up uploaded file: {filepath}")
         if file_id in file_store:
             del file_store[file_id]
-        
+
         return jsonify({
             'success': True,
             'analysis': {
@@ -225,13 +657,13 @@ def analyze():
             'predictions': results_df.to_dict(orient='records'),
             'n_compounds': len(results_df)
         })
-    
+
     except ImportError as e:
         return jsonify({
             'error': f'Missing dependency: {str(e)}',
             'instructions': 'Please install required packages: pip install drugreflector scanpy anndata'
         }), 500
-    
+
     except Exception as e:
         return jsonify({
             'error': f'Analysis failed: {str(e)}',
@@ -249,13 +681,19 @@ def cleanup_file(file_id):
     """Remove uploaded file"""
     if file_id not in file_store:
         return jsonify({'error': 'File not found'}), 404
-    
+
     filepath = file_store[file_id]['filepath']
     if os.path.exists(filepath):
         os.remove(filepath)
-    
+
     del file_store[file_id]
     return jsonify({'message': 'File removed successfully'})
+
+@app.route('/api/cleanup-all', methods=['POST'])
+def cleanup_all():
+    """Remove all uploaded files (called when browser session ends)"""
+    cleanup_all_uploads()
+    return jsonify({'message': 'All uploads cleaned up'})
 
 # ============== Main ==============
 
@@ -263,31 +701,43 @@ if __name__ == '__main__':
     print("=" * 60)
     print("DrugReflector Automation MVP")
     print("=" * 60)
-    
+
     # Check dependencies
     checkpoints_ok, missing = check_checkpoints_exist()
     if not checkpoints_ok:
-        print("\n⚠️  WARNING: Model checkpoints not found!")
+        print("\n  WARNING: Model checkpoints not found!")
         print(f"   Missing: {missing}")
         print(f"   Please download from Zenodo (DOI: 10.5281/zenodo.16912444)")
         print(f"   Place files in: {CHECKPOINT_DIR}")
     else:
-        print("✓ Model checkpoints found")
-    
+        print("  Model checkpoints found")
+
     try:
         import drugreflector
-        print("✓ DrugReflector installed")
+        print("  DrugReflector installed")
     except ImportError:
-        print("⚠️  DrugReflector not installed. Run: pip install drugreflector")
-    
+        print("  DrugReflector not installed. Run: pip install drugreflector")
+
     try:
         import scanpy
-        print("✓ Scanpy installed")
+        print("  Scanpy installed")
     except ImportError:
-        print("⚠️  Scanpy not installed. Run: pip install scanpy")
-    
+        print("  Scanpy not installed. Run: pip install scanpy")
+
+    try:
+        import scrublet
+        print("  Scrublet installed")
+    except ImportError:
+        print("  Scrublet not installed. Run: pip install scrublet")
+
+    try:
+        import celltypist
+        print("  CellTypist installed")
+    except ImportError:
+        print("  CellTypist not installed. Run: pip install celltypist")
+
     print("\n" + "=" * 60)
     print("Starting server at http://localhost:5001")
     print("=" * 60 + "\n")
-    
+
     app.run(debug=True, host='0.0.0.0', port=5001)

@@ -83,13 +83,487 @@
                 </div>
             </section>
 
-            <!-- Step 2: Metadata & Selection -->
-            <section class="step-section" id="metadataSection" hidden>
+            <!-- Step 2: Quality Control -->
+            <section class="step-section" id="qcSection" hidden>
                 <div class="step-header">
                     <div class="step-number">2</div>
                     <div class="step-info">
-                        <h2>Configure Analysis</h2>
-                        <p>Review metadata and select cell populations for comparison</p>
+                        <h2>Quality Control</h2>
+                        <p>Detect and remove doublets using Scrublet</p>
+                    </div>
+                </div>
+
+                <!-- File Summary Banner -->
+                <div class="file-summary-banner" id="fileSummaryBanner">
+                    <span class="file-badge" id="qcFilenameBadge">filename.h5ad</span>
+                    <div class="file-summary-stats">
+                        <span><strong id="qcCellCount">-</strong> cells</span>
+                        <span class="stat-separator">|</span>
+                        <span><strong id="qcGeneCount">-</strong> genes</span>
+                        <span class="stat-separator">|</span>
+                        <span id="qcNormStatus">-</span>
+                    </div>
+                </div>
+
+                <!-- Detected status banner -->
+                <div class="detected-banner" id="qcDetectedBanner" hidden>
+                    <span class="detected-icon">&#10003;</span>
+                    <span class="detected-text" id="qcDetectedText">Doublet scores already present in data</span>
+                </div>
+
+                <!-- Doublet Detection Controls -->
+                <div class="card qc-card">
+                    <div class="card-header">
+                        <h3>Doublet Detection</h3>
+                        <span class="badge badge-info">Scrublet</span>
+                    </div>
+                    <div class="card-content">
+                        <div class="form-group">
+                            <label for="doubletRate">Expected Doublet Rate</label>
+                            <div class="input-with-hint">
+                                <input type="number" id="doubletRate" class="text-input" value="0.06" min="0.01"
+                                    max="0.5" step="0.01">
+                                <span class="input-hint">Typical: 0.02 - 0.10 (depends on loading concentration)</span>
+                            </div>
+                        </div>
+                        <div class="action-bar action-bar-left">
+                            <button class="btn btn-primary" id="runScrubletBtn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <polygon points="5,3 19,12 5,21" />
+                                </svg>
+                                Run Scrublet
+                            </button>
+                            <button class="btn btn-secondary" id="skipQcBtn">
+                                Skip
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <line x1="5" y1="12" x2="19" y2="12" />
+                                    <polyline points="12,5 19,12 12,19" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- QC Results (hidden until Scrublet runs) -->
+                <div id="qcResults" hidden>
+                    <div class="card qc-results-card">
+                        <div class="card-header">
+                            <h3>Doublet Detection Results</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="stat-grid stat-grid-4">
+                                <div class="stat-item">
+                                    <span class="stat-value" id="totalCellsQc">-</span>
+                                    <span class="stat-label">Total Cells</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value stat-value-warning" id="doubletsFound">-</span>
+                                    <span class="stat-label">Doublets</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="doubletRateResult">-</span>
+                                    <span class="stat-label">Doublet Rate</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="scrubletThreshold">-</span>
+                                    <span class="stat-label">Threshold</span>
+                                </div>
+                            </div>
+
+                            <!-- Score Distribution Histogram -->
+                            <div class="histogram-section">
+                                <h4>Doublet Score Distribution</h4>
+                                <div class="histogram-wrapper">
+                                    <div class="histogram" id="scoreHistogram"></div>
+                                    <div class="histogram-labels">
+                                        <span>0.0</span>
+                                        <span>Doublet Score</span>
+                                        <span>1.0</span>
+                                    </div>
+                                    <div class="histogram-legend">
+                                        <span class="legend-item"><span class="legend-color legend-singlet"></span>
+                                            Singlets</span>
+                                        <span class="legend-item"><span class="legend-color legend-doublet"></span>
+                                            Doublets</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="action-bar action-bar-left">
+                                <button class="btn btn-primary" id="filterDoubletsBtn">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
+                                    </svg>
+                                    Filter Doublets
+                                </button>
+                                <button class="btn btn-secondary" id="keepDoubletsBtn">
+                                    Continue Without Filtering
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <line x1="5" y1="12" x2="19" y2="12" />
+                                        <polyline points="12,5 19,12 12,19" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 3: Cell Type Annotation -->
+            <section class="step-section" id="annotationSection" hidden>
+                <div class="step-header">
+                    <div class="step-number">3</div>
+                    <div class="step-info">
+                        <h2>Cell Type Annotation</h2>
+                        <p>Automatically annotate cell types using CellTypist pre-trained models</p>
+                    </div>
+                </div>
+
+                <!-- Detected status banner -->
+                <div class="detected-banner" id="annotationDetectedBanner" hidden>
+                    <span class="detected-icon">&#10003;</span>
+                    <span class="detected-text" id="annotationDetectedText">Cell type annotations already present</span>
+                </div>
+
+                <div class="card annotation-card">
+                    <div class="card-header">
+                        <h3>CellTypist Annotation</h3>
+                        <span class="badge badge-info">CellTypist</span>
+                    </div>
+                    <div class="card-content">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="celltypistModel">Model</label>
+                                <select id="celltypistModel" class="select-input">
+                                    <optgroup label="Human - Immune">
+                                        <option value="Immune_All_Low.pkl">Immune All - Low Resolution (33 types)
+                                        </option>
+                                        <option value="Immune_All_High.pkl">Immune All - High Resolution (98 types)
+                                        </option>
+                                        <option value="Healthy_COVID19_PBMC.pkl">Healthy / COVID19 PBMC</option>
+                                        <option value="COVID19_Immune_Landscape.pkl">COVID19 Immune Landscape</option>
+                                    </optgroup>
+                                    <optgroup label="Human - Tissue">
+                                        <option value="Human_Lung_Atlas.pkl">Human Lung Atlas</option>
+                                        <option value="Human_Colorectal_Cancer.pkl">Human Colorectal Cancer</option>
+                                    </optgroup>
+                                    <optgroup label="Human - Development">
+                                        <option value="Pan_Fetal_Human.pkl">Pan Fetal Human</option>
+                                        <option value="Developing_Human_Brain.pkl">Developing Human Brain</option>
+                                    </optgroup>
+                                    <optgroup label="Human - Brain">
+                                        <option value="Adult_Human_PrefrontalCortex.pkl">Adult Prefrontal Cortex
+                                        </option>
+                                    </optgroup>
+                                    <optgroup label="Mouse">
+                                        <option value="Developing_Mouse_Brain.pkl">Developing Mouse Brain</option>
+                                        <option value="Adult_Mouse_Gut.pkl">Adult Mouse Gut</option>
+                                        <option value="Cells_Fetal_Lung.pkl">Fetal Lung Cells</option>
+                                    </optgroup>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Options</label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="majorityVoting" checked>
+                                    <span class="checkbox-text">Majority voting</span>
+                                    <span class="input-hint">Refines predictions using over-clustering</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="action-bar action-bar-left">
+                            <button class="btn btn-primary" id="runAnnotationBtn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <polygon points="5,3 19,12 5,21" />
+                                </svg>
+                                Run CellTypist
+                            </button>
+                            <button class="btn btn-secondary" id="skipAnnotationBtn">
+                                Skip
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <line x1="5" y1="12" x2="19" y2="12" />
+                                    <polyline points="12,5 19,12 12,19" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Annotation Results (hidden until CellTypist runs) -->
+                <div id="annotationResults" hidden>
+                    <div class="card annotation-results-card">
+                        <div class="card-header">
+                            <h3>Cell Type Annotations</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="stat-grid">
+                                <div class="stat-item">
+                                    <span class="stat-value" id="nCellTypes">-</span>
+                                    <span class="stat-label">Cell Types</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="meanConfidence">-</span>
+                                    <span class="stat-label">Mean Confidence</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value stat-value-small" id="modelUsed">-</span>
+                                    <span class="stat-label">Model</span>
+                                </div>
+                            </div>
+
+                            <!-- Cell Type Breakdown Table -->
+                            <div class="table-container">
+                                <table class="results-table" id="cellTypeTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Cell Type</th>
+                                            <th>Count</th>
+                                            <th>Percentage</th>
+                                            <th>Confidence</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="cellTypeBody">
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div class="action-bar">
+                                <button class="btn btn-primary" id="continueToConfigBtn">
+                                    Continue to UMAP
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <line x1="5" y1="12" x2="19" y2="12" />
+                                        <polyline points="12,5 19,12 12,19" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Custom Model Training -->
+                <div class="card training-card" id="trainModelCard">
+                    <div class="card-header">
+                        <h3>Train Custom Model</h3>
+                        <span class="badge badge-info">Optional</span>
+                    </div>
+                    <div class="card-content">
+                        <p style="color: var(--text-400); font-size: 0.9375rem; margin-bottom: var(--space-4);">
+                            Train a custom CellTypist model from your data using an annotation column as labels.
+                            The trained model can be reused for future datasets.
+                        </p>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="trainLabelsColumn">Labels Column</label>
+                                <select id="trainLabelsColumn" class="select-input">
+                                    <option value="">Select annotation column...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="trainModelName">Model Name</label>
+                                <input type="text" id="trainModelName" class="text-input"
+                                    placeholder="e.g. my_PBMC_model">
+                            </div>
+                        </div>
+                        <div class="form-row" style="margin-top: var(--space-3);">
+                            <div class="form-group">
+                                <label for="trainSubsetColumn">Subset by group <span style="color: var(--text-500); font-weight: 400;">(optional)</span></label>
+                                <select id="trainSubsetColumn" class="select-input">
+                                    <option value="">All cells</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="trainMaxCells">Max cells <span style="color: var(--text-500); font-weight: 400;">(optional)</span></label>
+                                <input type="number" id="trainMaxCells" class="text-input"
+                                    placeholder="All cells" min="50" step="1000">
+                            </div>
+                        </div>
+                        <div id="trainSubsetValuesContainer" hidden style="margin-top: var(--space-3);">
+                            <label style="display: block; margin-bottom: var(--space-2);">Select values to include</label>
+                            <div class="subset-controls" style="margin-bottom: var(--space-2); display: flex; gap: var(--space-2);">
+                                <button type="button" class="btn btn-secondary" id="trainSubsetSelectAll" style="padding: 0.25rem 0.5rem; font-size: 0.8125rem;">Select all</button>
+                                <button type="button" class="btn btn-secondary" id="trainSubsetSelectNone" style="padding: 0.25rem 0.5rem; font-size: 0.8125rem;">Select none</button>
+                            </div>
+                            <div id="trainSubsetValues" class="subset-values-grid" style="display: flex; flex-wrap: wrap; gap: var(--space-2); max-height: 200px; overflow-y: auto; padding: var(--space-2); border: 1px solid var(--border-color, rgba(255,255,255,0.1)); border-radius: 0.5rem;"></div>
+                        </div>
+                        <details class="training-advanced">
+                            <summary>Advanced options</summary>
+                            <div class="form-row" style="margin-top: var(--space-3);">
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="trainFeatureSelection" checked>
+                                        <span class="checkbox-text">Feature selection</span>
+                                    </label>
+                                </div>
+                                <div class="form-group">
+                                    <label for="trainTopGenes">Top genes per type</label>
+                                    <input type="number" id="trainTopGenes" class="text-input" value="300" min="50" max="2000" step="50">
+                                </div>
+                                <div class="form-group">
+                                    <label for="trainEpochs">Epochs</label>
+                                    <input type="number" id="trainEpochs" class="text-input" value="10" min="1" max="100">
+                                </div>
+                            </div>
+                        </details>
+                        <div class="action-bar action-bar-left" style="margin-top: var(--space-4);">
+                            <button class="btn btn-primary" id="trainModelBtn" disabled>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                                    <path d="M2 17l10 5 10-5"/>
+                                    <path d="M2 12l10 5 10-5"/>
+                                </svg>
+                                Train Model
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Training Results -->
+                <div id="trainModelResults" hidden>
+                    <div class="card training-results-card">
+                        <div class="card-header">
+                            <h3>Training Complete</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="stat-grid stat-grid-4">
+                                <div class="stat-item">
+                                    <span class="stat-value" id="trainedModelName">-</span>
+                                    <span class="stat-label">Model Name</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="trainedNCells">-</span>
+                                    <span class="stat-label">Cells Trained</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="trainedNGenes">-</span>
+                                    <span class="stat-label">Genes</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="trainedNLabels">-</span>
+                                    <span class="stat-label">Labels</span>
+                                </div>
+                            </div>
+                            <div class="table-container" style="margin-top: var(--space-4);">
+                                <table class="results-table" id="trainedLabelsTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Label</th>
+                                            <th>Cells</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="trainedLabelsBody">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 4: UMAP Visualization -->
+            <section class="step-section" id="umapSection" hidden>
+                <div class="step-header">
+                    <div class="step-number">4</div>
+                    <div class="step-info">
+                        <h2>UMAP Visualization</h2>
+                        <p>Visualize cell populations in reduced dimensional space</p>
+                    </div>
+                </div>
+
+                <!-- Detected status banner -->
+                <div class="detected-banner" id="umapDetectedBanner" hidden>
+                    <span class="detected-icon">&#10003;</span>
+                    <span class="detected-text" id="umapDetectedText">UMAP embedding already present in data</span>
+                </div>
+
+                <div class="card umap-card">
+                    <div class="card-header">
+                        <h3>UMAP Embedding</h3>
+                        <span class="badge badge-info">Scanpy</span>
+                    </div>
+                    <div class="card-content">
+                        <p style="color: var(--text-400); font-size: 0.9375rem; margin-bottom: var(--space-4);">
+                            Compute a UMAP embedding to visualize cell clusters and validate annotations.
+                        </p>
+                        <div class="action-bar action-bar-left">
+                            <button class="btn btn-primary" id="runUmapBtn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <polygon points="5,3 19,12 5,21" />
+                                </svg>
+                                Compute UMAP
+                            </button>
+                            <button class="btn btn-secondary" id="skipUmapBtn">
+                                Skip
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <line x1="5" y1="12" x2="19" y2="12" />
+                                    <polyline points="12,5 19,12 12,19" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- UMAP Results (hidden until computed) -->
+                <div id="umapResults" hidden>
+                    <div class="card umap-results-card">
+                        <div class="card-header">
+                            <h3>UMAP Plot</h3>
+                            <span class="stat-label" id="umapCellCount"></span>
+                        </div>
+                        <div class="card-content">
+                            <div class="umap-controls">
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="umapColorBy">Color by metadata</label>
+                                    <select id="umapColorBy" class="select-input umap-color-select">
+                                        <option value="">Select column...</option>
+                                    </select>
+                                </div>
+                                <div class="umap-controls-divider">or</div>
+                                <div class="form-group" style="margin-bottom: 0; position: relative;">
+                                    <label for="umapGeneInput">Color by gene</label>
+                                    <input type="text" id="umapGeneInput" class="text-input umap-gene-input"
+                                        placeholder="Search gene..." autocomplete="off">
+                                    <div class="gene-autocomplete" id="geneAutocomplete" hidden></div>
+                                </div>
+                            </div>
+
+                            <div class="umap-plot-container">
+                                <div id="umapPlot"></div>
+                            </div>
+
+                            <div id="umapSteps" style="margin-top: var(--space-4); font-size: 0.8125rem; color: var(--text-500);"></div>
+
+                            <div class="action-bar">
+                                <button class="btn btn-primary" id="continueFromUmapBtn">
+                                    Continue to Drug Prediction
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <line x1="5" y1="12" x2="19" y2="12" />
+                                        <polyline points="12,5 19,12 12,19" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 5: Configure Drug Prediction -->
+            <section class="step-section" id="metadataSection" hidden>
+                <div class="step-header">
+                    <div class="step-number">5</div>
+                    <div class="step-info">
+                        <h2>Configure Drug Prediction</h2>
+                        <p>Select cell populations for compound prediction</p>
                     </div>
                 </div>
 
@@ -176,10 +650,10 @@
                 </div>
             </section>
 
-            <!-- Step 3: Results -->
+            <!-- Step 6: Results -->
             <section class="step-section" id="resultsSection" hidden>
                 <div class="step-header">
-                    <div class="step-number">3</div>
+                    <div class="step-number">6</div>
                     <div class="step-info">
                         <h2>Compound Predictions</h2>
                         <p id="resultsSummary">Ranked compounds that may induce the desired state transition</p>
@@ -290,6 +764,7 @@
         </footer>
     </div>
 
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
     <script src="/static/js/app.js"></script>
 </body>
 

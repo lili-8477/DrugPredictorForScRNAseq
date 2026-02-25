@@ -69,15 +69,58 @@ def get_categorical_info(adata):
     return categorical_info
 
 
+def detect_existing_results(adata):
+    """
+    Detect what analysis results already exist in the AnnData object.
+
+    Args:
+        adata: AnnData object
+
+    Returns:
+        dict: Detection results for doublets, annotations, and UMAP
+    """
+    obs_cols = set(adata.obs.columns)
+
+    # Detect doublet scores
+    has_doublet_scores = 'doublet_score' in obs_cols or 'predicted_doublet' in obs_cols
+
+    # Detect cell type annotations - check common annotation column names
+    annotation_columns = []
+    annotation_patterns = [
+        'celltypist_prediction', 'celltypist_majority_voting',
+        'cell_type', 'celltype', 'cell_ontology_class',
+        'predicted_labels', 'majority_voting',
+        'leiden', 'louvain', 'cluster', 'clusters'
+    ]
+    for col in obs_cols:
+        col_lower = col.lower()
+        for pattern in annotation_patterns:
+            if pattern in col_lower:
+                annotation_columns.append(col)
+                break
+
+    has_cell_type_annotations = len(annotation_columns) > 0
+
+    # Detect UMAP
+    has_umap = 'X_umap' in adata.obsm
+
+    return {
+        'has_doublet_scores': has_doublet_scores,
+        'has_cell_type_annotations': has_cell_type_annotations,
+        'annotation_columns': annotation_columns,
+        'has_umap': has_umap
+    }
+
+
 def extract_metadata(adata, file_id, filename):
     """
     Extract metadata from AnnData object.
-    
+
     Args:
         adata: AnnData object
         file_id: Unique file identifier
         filename: Original filename
-        
+
     Returns:
         dict: Metadata dictionary ready for JSON serialization
     """
@@ -94,8 +137,11 @@ def extract_metadata(adata, file_id, filename):
         'is_log_normalized': bool(is_log_normalized(adata)),
         'layers': list(adata.layers.keys()) if adata.layers else []
     }
-    
+
     # Add categorical column information
     metadata['categorical_columns'] = get_categorical_info(adata)
-    
+
+    # Detect existing analysis results
+    metadata['existing_results'] = detect_existing_results(adata)
+
     return metadata
