@@ -8,7 +8,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Upload configuration
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
-ALLOWED_EXTENSIONS = {'h5ad'}
+ALLOWED_EXTENSIONS = {'h5ad', 'h5'}
 MAX_CONTENT_LENGTH = 2 * 1024 * 1024 * 1024  # 2GB max file size
 
 # DrugReflector model checkpoints

@@ -10,22 +10,25 @@
 
 This application provides a user-friendly web interface for:
 
-1. **Uploading** single-cell RNA-seq data in AnnData format (`.h5ad`)
-2. **Inspecting** metadata and selecting cell populations
-3. **Computing** v-score differential expression signatures
-4. **Predicting** compounds that may induce desired state transitions using DrugReflector
-5. **Exploring** compounds via direct iLINCS database integration
+1. **Uploading** single-cell RNA-seq data — Cell Ranger output (directory or `.h5`) or preprocessed `.h5ad`
+2. **Quality Control** — automated QC metrics, interactive threshold filtering, and doublet detection
+3. **Preprocessing** — normalization, log-transform, and highly variable gene selection
+4. **Cell Type Annotation** — CellTypist integration with pre-trained and custom model training
+5. **UMAP Visualization** — interactive dimensionality reduction with gene expression overlay
+6. **Drug Prediction** — v-score differential expression and DrugReflector compound ranking
+7. **Exploring** compounds via direct iLINCS database integration
 
 ## Features
 
-✨ **Key Capabilities:**
-
-- 🧬 **Automated Analysis Pipeline**: End-to-end workflow from data upload to drug predictions
-- 🤖 **AI-Powered Predictions**: DrugReflector ensemble models for accurate drug-gene signature matching
-- 🔗 **iLINCS Integration**: One-click access to detailed compound information and signatures
-- 📊 **Interactive Results**: Browse, sort, and export predicted compounds with confidence scores
-- 🏗️ **Modular Codebase**: Clean architecture for easy maintenance and extension
-- 🎨 **Modern UI**: Dark-themed, responsive interface with intuitive workflow
+- **Full Upstream Pipeline**: From raw Cell Ranger counts through QC, filtering, normalization, and annotation
+- **Three Upload Paths**: Cell Ranger directory (3 gzipped files), Cell Ranger `.h5` file, or preprocessed `.h5ad`
+- **Interactive QC**: Violin/scatter plots with adjustable thresholds for genes, UMI counts, mitochondrial %, and ribosomal %
+- **Doublet Detection**: Scrublet integration with histogram visualization and one-click filtering
+- **Cell Type Annotation**: CellTypist with 50+ pre-trained models and custom model training with cell subsetting
+- **UMAP Visualization**: Interactive 2D embedding colored by cell type or gene expression
+- **AI-Powered Predictions**: DrugReflector ensemble models for drug-gene signature matching
+- **iLINCS Integration**: One-click access to detailed compound information and signatures
+- **Modern UI**: Dark-themed, responsive interface with tabbed upload and step-by-step workflow
 
 ## Quick Start
 
@@ -60,54 +63,62 @@ Navigate to **http://localhost:5001**
 
 ### Step 1: Upload Data
 
-- Drag and drop your `.h5ad` file or click to browse
-- Supports single-cell AnnData files with cell type annotations
+Three upload options:
+- **Cell Ranger Directory**: Upload `barcodes.tsv.gz`, `features.tsv.gz`, and `matrix.mtx.gz` → enters full QC pipeline
+- **Cell Ranger H5**: Upload a single `filtered_feature_bc_matrix.h5` file → enters full QC pipeline
+- **Preprocessed .h5ad**: Upload a pre-processed AnnData file → skips QC, goes to doublet detection
 
-### Step 2: Configure Analysis
+### Step 2: Quality Control (Cell Ranger paths)
 
-- Review data summary (cells, genes, normalization status)
-- Select **Group Column** (e.g., `cell_type`, `louvain`, `cluster`)
-- Choose **Source** (baseline) and **Target** (desired state) populations
+- Review QC metric distributions (violin + scatter plots)
+- Adjust filtering thresholds with real-time cell count preview
+- Apply filters to remove low-quality cells and genes
 
-### Step 3: View Results
+### Step 3: Preprocessing & Normalization
 
-- View top differentially expressed genes (v-scores)
-- Browse ranked compounds with probability scores
-- Click iLINCS links to explore compound details and signatures
-- Export results as CSV or JSON
+- Automatic normalization (10k counts/cell), log-transform, and HVG selection
+- Doublet detection with Scrublet
+
+### Step 4: Cell Type Annotation
+
+- Annotate cells using CellTypist pre-trained models
+- Train custom models from your own labels with optional cell subsetting
+- View UMAP colored by cell type or gene expression
+
+### Step 5: Drug Prediction
+
+- Select group column, source, and target populations
+- View ranked compounds with probability scores
+- Click iLINCS links to explore compound details
 
 ## Project Structure
 
 ```
 DrugPredictorForScRNAseq/
-├── app.py              # Main Flask application (refactored & modular)
-├── config.py           # Configuration settings
-├── requirements.txt    # Python dependencies
-├── index.html          # Main web page
-├── utils/              # Utility modules (NEW!)
-│   ├── __init__.py    # Package initialization
-│   ├── metadata.py    # AnnData metadata extraction
-│   ├── prediction.py  # DrugReflector prediction pipeline
-│   ├── urls.py        # iLINCS URL generation
-│   └── validation.py  # File and checkpoint validation
+├── app.py                  # Main Flask application
+├── config.py               # Configuration settings
+├── requirements.txt        # Python dependencies
+├── index.html              # Main web page
+├── utils/
+│   ├── __init__.py         # Package initialization & exports
+│   ├── metadata.py         # AnnData metadata extraction
+│   ├── preprocessing.py    # 10x reading, QC metrics, filtering, normalization
+│   ├── prediction.py       # DrugReflector prediction pipeline
+│   ├── doublet_detection.py # Scrublet doublet detection
+│   ├── annotation.py       # CellTypist annotation & model training
+│   ├── umap.py             # UMAP computation
+│   ├── urls.py             # iLINCS URL generation
+│   └── validation.py       # File and checkpoint validation
+├── custom_models/          # User-trained CellTypist models
 ├── static/
 │   ├── css/
-│   │   └── style.css   # Premium dark theme styles
+│   │   └── style.css       # Dark theme styles
 │   └── js/
-│       └── app.js      # Frontend application logic
-├── uploads/            # Temporary file storage (auto-created)
-├── checkpoints/        # DrugReflector model files
+│       └── app.js          # Frontend application logic
+├── uploads/                # Temporary file storage (auto-created)
+├── checkpoints/            # DrugReflector model files
 └── README.md
 ```
-
-### Modular Architecture
-
-The application has been refactored into a clean, maintainable modular structure:
-
-- **`utils/metadata.py`**: Handles AnnData file inspection, metadata extraction, and JSON serialization
-- **`utils/prediction.py`**: Complete DrugReflector pipeline including v-score computation, preprocessing, and result formatting
-- **`utils/urls.py`**: Generates iLINCS database URLs for compound exploration
-- **`utils/validation.py`**: File upload validation, checkpoint verification, and group validation
 
 ## API Endpoints
 
@@ -115,9 +126,25 @@ The application has been refactored into a clean, maintainable modular structure
 |----------|--------|-------------|
 | `/api/status` | GET | Check system and dependency status |
 | `/api/upload` | POST | Upload `.h5ad` file |
+| `/api/upload-10x` | POST | Upload Cell Ranger directory (3 files) |
+| `/api/upload-10x-h5` | POST | Upload Cell Ranger `.h5` file |
 | `/api/metadata/<file_id>` | GET | Get AnnData metadata |
+| `/api/qc-metrics/<file_id>` | POST | Compute QC metrics and plot data |
+| `/api/qc-filter` | POST | Apply QC filtering thresholds |
+| `/api/preprocess` | POST | Run normalization + HVG pipeline |
+| `/api/doublet-detection` | POST | Run Scrublet doublet detection |
+| `/api/filter-doublets` | POST | Remove detected doublets |
+| `/api/celltypist-models` | GET | List available CellTypist models |
+| `/api/annotate` | POST | Run CellTypist annotation |
+| `/api/annotation-columns/<file_id>` | GET | Get categorical columns for labels |
+| `/api/train-model` | POST | Train custom CellTypist model |
+| `/api/custom-models` | GET | List user-trained models |
+| `/api/umap` | POST | Compute UMAP embedding |
+| `/api/gene-expression` | POST | Get expression values for a gene |
+| `/api/gene-search` | POST | Search gene names |
 | `/api/analyze` | POST | Run DrugReflector analysis |
 | `/api/cleanup/<file_id>` | DELETE | Remove uploaded file |
+| `/api/cleanup-all` | POST | Remove all uploaded files |
 
 ## Requirements
 
@@ -127,6 +154,8 @@ The application has been refactored into a clean, maintainable modular structure
 - Scanpy
 - AnnData
 - Flask
+- Scrublet
+- CellTypist
 
 ## License
 

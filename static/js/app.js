@@ -14,7 +14,10 @@ const state = {
     results: null,
     sortColumn: 'rank',
     sortDirection: 'asc',
-    // New upstream analysis state
+    // Upstream analysis state
+    uploadSource: null, // '10x' or 'h5ad'
+    tenxFiles: { barcodes: null, features: null, matrix: null },
+    qcPlotData: null, // cached distributions for client-side threshold preview
     doubletResults: null,
     annotationResults: null,
     doubletsFiltered: false,
@@ -29,13 +32,82 @@ const elements = {
 
     // Upload section
     uploadSection: document.getElementById('uploadSection'),
+    tab10x: document.getElementById('tab10x'),
+    tabH5: document.getElementById('tabH5'),
+    tabH5ad: document.getElementById('tabH5ad'),
+    panel10x: document.getElementById('panel10x'),
+    panelH5: document.getElementById('panelH5'),
+    panelH5ad: document.getElementById('panelH5ad'),
+    uploadZoneH5: document.getElementById('uploadZoneH5'),
+    fileInputH5: document.getElementById('fileInputH5'),
+    uploadProgressH5: document.getElementById('uploadProgressH5'),
+    progressFillH5: document.getElementById('progressFillH5'),
+    progressTextH5: document.getElementById('progressTextH5'),
+    uploadZone10x: document.getElementById('uploadZone10x'),
+    fileInput10x: document.getElementById('fileInput10x'),
+    tenxFileList: document.getElementById('tenxFileList'),
+    tenxBarcodes: document.getElementById('tenxBarcodes'),
+    tenxFeatures: document.getElementById('tenxFeatures'),
+    tenxMatrix: document.getElementById('tenxMatrix'),
+    tenxUploadActions: document.getElementById('tenxUploadActions'),
+    upload10xBtn: document.getElementById('upload10xBtn'),
+    uploadProgress10x: document.getElementById('uploadProgress10x'),
+    progressFill10x: document.getElementById('progressFill10x'),
+    progressText10x: document.getElementById('progressText10x'),
     uploadZone: document.getElementById('uploadZone'),
     fileInput: document.getElementById('fileInput'),
     uploadProgress: document.getElementById('uploadProgress'),
     progressFill: document.getElementById('progressFill'),
     progressText: document.getElementById('progressText'),
 
-    // QC section
+    // QC Visualization section (NEW)
+    qcVisualizationSection: document.getElementById('qcVisualizationSection'),
+    qcVizFilenameBadge: document.getElementById('qcVizFilenameBadge'),
+    qcVizCellCount: document.getElementById('qcVizCellCount'),
+    qcVizGeneCount: document.getElementById('qcVizGeneCount'),
+    qcVizMedianGenes: document.getElementById('qcVizMedianGenes'),
+    qcVizMedianUmi: document.getElementById('qcVizMedianUmi'),
+    qcVizMedianMt: document.getElementById('qcVizMedianMt'),
+    violinNcounts: document.getElementById('violinNcounts'),
+    violinNgenes: document.getElementById('violinNgenes'),
+    violinPctMt: document.getElementById('violinPctMt'),
+    violinPctRibo: document.getElementById('violinPctRibo'),
+    scatterCountsGenes: document.getElementById('scatterCountsGenes'),
+    scatterGenesMt: document.getElementById('scatterGenesMt'),
+    threshMinGenes: document.getElementById('threshMinGenes'),
+    threshMinGenesVal: document.getElementById('threshMinGenesVal'),
+    threshMinCounts: document.getElementById('threshMinCounts'),
+    threshMinCountsVal: document.getElementById('threshMinCountsVal'),
+    threshMaxMt: document.getElementById('threshMaxMt'),
+    threshMaxMtVal: document.getElementById('threshMaxMtVal'),
+    threshMaxRibo: document.getElementById('threshMaxRibo'),
+    threshMaxRiboVal: document.getElementById('threshMaxRiboVal'),
+    cellsPassingCount: document.getElementById('cellsPassingCount'),
+    cellsTotalCount: document.getElementById('cellsTotalCount'),
+    applyFiltersBtn: document.getElementById('applyFiltersBtn'),
+
+    // Filter Results section (NEW)
+    filterResultsSection: document.getElementById('filterResultsSection'),
+    filterCellsBefore: document.getElementById('filterCellsBefore'),
+    filterCellsAfter: document.getElementById('filterCellsAfter'),
+    filterCellsRemoved: document.getElementById('filterCellsRemoved'),
+    filterGenesBefore: document.getElementById('filterGenesBefore'),
+    filterGenesAfter: document.getElementById('filterGenesAfter'),
+    filterGenesRemoved: document.getElementById('filterGenesRemoved'),
+    continueToDoubletBtn: document.getElementById('continueToDoubletBtn'),
+
+    // Preprocess section (NEW)
+    preprocessSection: document.getElementById('preprocessSection'),
+    runPreprocessBtn: document.getElementById('runPreprocessBtn'),
+    preprocessResults: document.getElementById('preprocessResults'),
+    prepCells: document.getElementById('prepCells'),
+    prepGenes: document.getElementById('prepGenes'),
+    prepHvg: document.getElementById('prepHvg'),
+    prepNormStatus: document.getElementById('prepNormStatus'),
+    prepStepsList: document.getElementById('prepStepsList'),
+    continueToAnnotationBtn: document.getElementById('continueToAnnotationBtn'),
+
+    // QC section (doublet detection)
     qcSection: document.getElementById('qcSection'),
     qcDetectedBanner: document.getElementById('qcDetectedBanner'),
     qcDetectedText: document.getElementById('qcDetectedText'),
@@ -156,6 +228,97 @@ const api = {
 
     async checkStatus() {
         const response = await fetch(`${this.baseUrl}/api/status`);
+        return response.json();
+    },
+
+    async upload10x(barcodes, features, matrix) {
+        const formData = new FormData();
+        formData.append('barcodes', barcodes);
+        formData.append('features', features);
+        formData.append('matrix', matrix);
+
+        const response = await fetch(`${this.baseUrl}/api/upload-10x`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                const error = await response.json();
+                throw new Error(error.error || 'Upload failed');
+            } else {
+                throw new Error(`Server error: ${response.status} ${response.statusText}`);
+            }
+        }
+
+        return response.json();
+    },
+
+    async upload10xH5(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch(`${this.baseUrl}/api/upload-10x-h5`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                const error = await response.json();
+                throw new Error(error.error || 'Upload failed');
+            } else {
+                throw new Error(`Server error: ${response.status} ${response.statusText}`);
+            }
+        }
+
+        return response.json();
+    },
+
+    async computeQcMetrics(fileId) {
+        const response = await fetch(`${this.baseUrl}/api/qc-metrics/${fileId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'QC metrics computation failed');
+        }
+
+        return response.json();
+    },
+
+    async applyQcFilter(params) {
+        const response = await fetch(`${this.baseUrl}/api/qc-filter`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params)
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'QC filtering failed');
+        }
+
+        return response.json();
+    },
+
+    async runPreprocess(fileId) {
+        const response = await fetch(`${this.baseUrl}/api/preprocess`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_id: fileId })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Preprocessing failed');
+        }
+
         return response.json();
     },
 
@@ -434,6 +597,400 @@ function populateSelect(selectElement, options, placeholder = 'Select...') {
     });
 }
 
+// ==================== Upload Tab Switching ====================
+function handleTabSwitch(tab) {
+    // Deactivate all tabs and hide all panels
+    elements.tab10x.classList.remove('active');
+    elements.tabH5.classList.remove('active');
+    elements.tabH5ad.classList.remove('active');
+    elements.panel10x.hidden = true;
+    elements.panelH5.hidden = true;
+    elements.panelH5ad.hidden = true;
+
+    // Activate the selected tab and show its panel
+    if (tab === '10x') {
+        elements.tab10x.classList.add('active');
+        elements.panel10x.hidden = false;
+    } else if (tab === 'h5') {
+        elements.tabH5.classList.add('active');
+        elements.panelH5.hidden = false;
+    } else {
+        elements.tabH5ad.classList.add('active');
+        elements.panelH5ad.hidden = false;
+    }
+}
+
+// ==================== 10x File Handling ====================
+function handle10xFileSelect(e) {
+    const files = Array.from(e.target.files);
+    classify10xFiles(files);
+}
+
+function handle10xDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    elements.uploadZone10x.classList.remove('drag-over');
+
+    const files = Array.from(e.dataTransfer.files);
+    classify10xFiles(files);
+}
+
+function classify10xFiles(files) {
+    state.tenxFiles = { barcodes: null, features: null, matrix: null };
+
+    files.forEach(f => {
+        const name = f.name.toLowerCase();
+        if (name.includes('barcodes') && name.endsWith('.tsv.gz')) {
+            state.tenxFiles.barcodes = f;
+        } else if (name.includes('features') && name.endsWith('.tsv.gz')) {
+            state.tenxFiles.features = f;
+        } else if (name.includes('genes') && name.endsWith('.tsv.gz')) {
+            // genes.tsv.gz is an older format for features
+            state.tenxFiles.features = f;
+        } else if (name.includes('matrix') && name.endsWith('.mtx.gz')) {
+            state.tenxFiles.matrix = f;
+        }
+    });
+
+    // Update file list display
+    elements.tenxFileList.hidden = false;
+    elements.tenxUploadActions.hidden = false;
+
+    const updateIcon = (el, file) => {
+        const icon = el.querySelector('.tenx-file-icon');
+        if (file) {
+            icon.textContent = '\u2713';
+            icon.className = 'tenx-file-icon ready';
+        } else {
+            icon.textContent = '?';
+            icon.className = 'tenx-file-icon pending';
+        }
+    };
+
+    updateIcon(elements.tenxBarcodes, state.tenxFiles.barcodes);
+    updateIcon(elements.tenxFeatures, state.tenxFiles.features);
+    updateIcon(elements.tenxMatrix, state.tenxFiles.matrix);
+
+    const allReady = state.tenxFiles.barcodes && state.tenxFiles.features && state.tenxFiles.matrix;
+    elements.upload10xBtn.disabled = !allReady;
+}
+
+async function handleUpload10x() {
+    if (!state.tenxFiles.barcodes || !state.tenxFiles.features || !state.tenxFiles.matrix) {
+        showError('Please select all 3 Cell Ranger files');
+        return;
+    }
+
+    elements.uploadProgress10x.hidden = false;
+    elements.progressFill10x.style.width = '20%';
+    elements.progressText10x.textContent = 'Uploading files...';
+
+    try {
+        elements.progressFill10x.style.width = '40%';
+        const result = await api.upload10x(
+            state.tenxFiles.barcodes,
+            state.tenxFiles.features,
+            state.tenxFiles.matrix
+        );
+
+        state.fileId = result.file_id;
+        state.filename = result.filename;
+        state.uploadSource = '10x';
+
+        elements.progressFill10x.style.width = '70%';
+        elements.progressText10x.textContent = 'Computing QC metrics...';
+
+        // Automatically compute QC metrics
+        const qcResult = await api.computeQcMetrics(state.fileId);
+        state.qcPlotData = qcResult.plot_data;
+
+        elements.progressFill10x.style.width = '100%';
+        elements.progressText10x.textContent = 'Complete!';
+
+        // Get metadata for downstream use
+        const metadata = await api.getMetadata(state.fileId);
+        state.metadata = metadata;
+
+        setTimeout(() => {
+            showQcVisualization(qcResult);
+        }, 500);
+
+    } catch (error) {
+        showError(error.message);
+        elements.uploadProgress10x.hidden = true;
+    }
+}
+
+// ==================== H5 Upload Handling ====================
+async function handleUploadH5(file) {
+    if (!file) return;
+
+    elements.uploadProgressH5.hidden = false;
+    elements.progressFillH5.style.width = '20%';
+    elements.progressTextH5.textContent = 'Uploading H5 file...';
+
+    try {
+        elements.progressFillH5.style.width = '40%';
+        const result = await api.upload10xH5(file);
+
+        state.fileId = result.file_id;
+        state.filename = result.filename;
+        state.uploadSource = '10x';
+
+        elements.progressFillH5.style.width = '70%';
+        elements.progressTextH5.textContent = 'Computing QC metrics...';
+
+        // Automatically compute QC metrics (same as 10x mtx path)
+        const qcResult = await api.computeQcMetrics(state.fileId);
+        state.qcPlotData = qcResult.plot_data;
+
+        elements.progressFillH5.style.width = '100%';
+        elements.progressTextH5.textContent = 'Complete!';
+
+        // Get metadata for downstream use
+        const metadata = await api.getMetadata(state.fileId);
+        state.metadata = metadata;
+
+        setTimeout(() => {
+            showQcVisualization(qcResult);
+        }, 500);
+
+    } catch (error) {
+        showError(error.message);
+        elements.uploadProgressH5.hidden = true;
+    }
+}
+
+// ==================== QC Visualization ====================
+function showQcVisualization(qcResult) {
+    const plotData = qcResult.plot_data;
+    const summary = plotData.summary;
+
+    // Update summary banner
+    elements.qcVizCellCount.textContent = formatNumber(summary.n_cells);
+    elements.qcVizGeneCount.textContent = formatNumber(plotData.distributions.n_genes.length > 0 ? summary.n_genes.median : 0);
+    elements.qcVizMedianGenes.textContent = formatNumber(Math.round(summary.n_genes.median));
+    elements.qcVizMedianUmi.textContent = formatNumber(Math.round(summary.n_counts.median));
+    elements.qcVizMedianMt.textContent = summary.pct_mt.median.toFixed(1) + '%';
+
+    // Set slider ranges based on data
+    const maxGenes = Math.min(Math.round(summary.n_genes.max * 1.1), 50000);
+    const maxCounts = Math.min(Math.round(summary.n_counts.max * 1.1), 500000);
+    elements.threshMinGenes.max = maxGenes;
+    elements.threshMinCounts.max = maxCounts;
+
+    // Update total cells count
+    elements.cellsTotalCount.textContent = summary.n_cells;
+
+    // Show section
+    elements.qcVisualizationSection.hidden = false;
+    elements.uploadProgress10x.hidden = true;
+
+    // Render plots
+    renderQcPlots(plotData);
+
+    // Compute initial cells passing
+    handleThresholdChange();
+
+    elements.qcVisualizationSection.scrollIntoView({ behavior: 'smooth' });
+    updateHeaderStatus('ok', 'Review QC metrics');
+}
+
+function renderQcPlots(plotData) {
+    const dist = plotData.distributions;
+    const plotConfig = { responsive: true, displayModeBar: false };
+    const darkLayout = {
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(30,41,59,0.6)',
+        font: { color: '#e2e8f0', family: 'Inter, sans-serif', size: 11 },
+        margin: { l: 50, r: 20, t: 30, b: 30 },
+    };
+
+    // Violin/box plots
+    const makeViolin = (containerId, data, title, color) => {
+        Plotly.newPlot(containerId, [{
+            y: data,
+            type: 'violin',
+            box: { visible: true },
+            meanline: { visible: true },
+            fillcolor: color,
+            opacity: 0.6,
+            line: { color: color },
+            marker: { size: 2 },
+            points: data.length <= 5000 ? 'all' : false,
+            jitter: 0.3,
+            pointpos: -1.5
+        }], {
+            ...darkLayout,
+            title: { text: title, font: { size: 13, color: '#cbd5e1' } },
+            yaxis: { color: '#94a3b8', gridcolor: 'rgba(255,255,255,0.05)' },
+            xaxis: { showticklabels: false },
+        }, plotConfig);
+    };
+
+    makeViolin('violinNcounts', dist.n_counts, 'UMI Counts', '#6366f1');
+    makeViolin('violinNgenes', dist.n_genes, 'Genes Detected', '#22d3ee');
+    makeViolin('violinPctMt', dist.pct_mt, '% Mitochondrial', '#ef4444');
+    makeViolin('violinPctRibo', dist.pct_ribo, '% Ribosomal', '#f59e0b');
+
+    // Scatter plots
+    const scatter = plotData.scatter;
+
+    Plotly.newPlot('scatterCountsGenes', [{
+        x: scatter.x_counts,
+        y: scatter.y_genes,
+        mode: 'markers',
+        type: 'scattergl',
+        marker: {
+            size: 2,
+            color: scatter.color_pct_mt,
+            colorscale: [[0, '#22d3ee'], [0.5, '#f59e0b'], [1, '#ef4444']],
+            colorbar: { title: { text: '%MT', font: { color: '#e2e8f0', size: 10 } }, tickfont: { color: '#94a3b8' }, thickness: 12, len: 0.6 },
+            opacity: 0.5,
+        },
+        hovertemplate: 'UMI: %{x}<br>Genes: %{y}<br>%MT: %{marker.color:.1f}<extra></extra>'
+    }], {
+        ...darkLayout,
+        title: { text: 'UMI Counts vs Genes (colored by %MT)', font: { size: 13, color: '#cbd5e1' } },
+        xaxis: { title: 'UMI Counts', color: '#94a3b8', gridcolor: 'rgba(255,255,255,0.05)' },
+        yaxis: { title: 'Genes', color: '#94a3b8', gridcolor: 'rgba(255,255,255,0.05)' },
+    }, plotConfig);
+
+    Plotly.newPlot('scatterGenesMt', [{
+        x: scatter.x_genes,
+        y: scatter.y_pct_mt,
+        mode: 'markers',
+        type: 'scattergl',
+        marker: { size: 2, color: '#ef4444', opacity: 0.4 },
+        hovertemplate: 'Genes: %{x}<br>%MT: %{y:.1f}<extra></extra>'
+    }], {
+        ...darkLayout,
+        title: { text: 'Genes vs %Mitochondrial', font: { size: 13, color: '#cbd5e1' } },
+        xaxis: { title: 'Genes Detected', color: '#94a3b8', gridcolor: 'rgba(255,255,255,0.05)' },
+        yaxis: { title: '% Mitochondrial', color: '#94a3b8', gridcolor: 'rgba(255,255,255,0.05)' },
+    }, plotConfig);
+}
+
+// ==================== Threshold Controls ====================
+function handleThresholdChange() {
+    if (!state.qcPlotData) return;
+    const dist = state.qcPlotData.distributions;
+
+    const minGenes = parseFloat(elements.threshMinGenes.value);
+    const minCounts = parseFloat(elements.threshMinCounts.value);
+    const maxMt = parseFloat(elements.threshMaxMt.value);
+    const maxRibo = parseFloat(elements.threshMaxRibo.value);
+
+    // Count passing cells client-side
+    let passing = 0;
+    const n = dist.n_genes.length;
+    for (let i = 0; i < n; i++) {
+        if (dist.n_genes[i] >= minGenes &&
+            dist.n_counts[i] >= minCounts &&
+            dist.pct_mt[i] <= maxMt &&
+            dist.pct_ribo[i] <= maxRibo) {
+            passing++;
+        }
+    }
+
+    elements.cellsPassingCount.textContent = formatNumber(passing);
+    elements.cellsTotalCount.textContent = formatNumber(n);
+}
+
+function syncSliderToInput(sliderId, inputId) {
+    const slider = document.getElementById(sliderId);
+    const input = document.getElementById(inputId);
+    if (!slider || !input) return;
+
+    slider.addEventListener('input', () => {
+        input.value = slider.value;
+        handleThresholdChange();
+    });
+    input.addEventListener('input', () => {
+        slider.value = input.value;
+        handleThresholdChange();
+    });
+}
+
+// ==================== Apply QC Filters ====================
+async function handleApplyFilters() {
+    showLoading('Applying Filters', 'Filtering cells and genes based on your thresholds...');
+
+    try {
+        const result = await api.applyQcFilter({
+            file_id: state.fileId,
+            min_genes: parseInt(elements.threshMinGenesVal.value),
+            min_counts: parseInt(elements.threshMinCountsVal.value),
+            max_pct_mt: parseFloat(elements.threshMaxMtVal.value),
+            max_pct_ribo: parseFloat(elements.threshMaxRiboVal.value),
+        });
+
+        hideLoading();
+        showFilterResults(result.summary);
+
+        // Update metadata
+        const metadata = await api.getMetadata(state.fileId);
+        state.metadata = metadata;
+
+    } catch (error) {
+        hideLoading();
+        showError(error.message);
+    }
+}
+
+function showFilterResults(summary) {
+    elements.filterCellsBefore.textContent = formatNumber(summary.n_cells_before);
+    elements.filterCellsAfter.textContent = formatNumber(summary.n_cells_after);
+    elements.filterCellsRemoved.textContent = `(-${formatNumber(summary.n_cells_removed)})`;
+    elements.filterGenesBefore.textContent = formatNumber(summary.n_genes_before);
+    elements.filterGenesAfter.textContent = formatNumber(summary.n_genes_after);
+    elements.filterGenesRemoved.textContent = `(-${formatNumber(summary.n_genes_removed)})`;
+
+    elements.filterResultsSection.hidden = false;
+    elements.filterResultsSection.scrollIntoView({ behavior: 'smooth' });
+}
+
+function handleContinueToDoublet() {
+    showQcSection(state.metadata);
+}
+
+// ==================== Preprocessing ====================
+async function handleRunPreprocess() {
+    showLoading('Preprocessing', 'Normalizing, log-transforming, and selecting HVGs...');
+
+    try {
+        const result = await api.runPreprocess(state.fileId);
+        hideLoading();
+
+        elements.prepCells.textContent = formatNumber(result.n_cells);
+        elements.prepGenes.textContent = formatNumber(result.n_genes);
+        elements.prepHvg.textContent = result.n_hvg ? formatNumber(result.n_hvg) : '-';
+        elements.prepNormStatus.textContent = 'Normalized';
+        elements.prepStepsList.textContent = 'Steps: ' + result.steps.join(' \u2192 ');
+        elements.preprocessResults.hidden = false;
+        elements.preprocessResults.scrollIntoView({ behavior: 'smooth' });
+
+        // Update metadata
+        const metadata = await api.getMetadata(state.fileId);
+        state.metadata = metadata;
+
+    } catch (error) {
+        hideLoading();
+        showError(error.message);
+    }
+}
+
+function handleContinueToAnnotation() {
+    showAnnotationSection();
+}
+
+function showPreprocessSection() {
+    elements.preprocessSection.hidden = false;
+    elements.preprocessResults.hidden = true;
+    elements.preprocessSection.scrollIntoView({ behavior: 'smooth' });
+    updateHeaderStatus('ok', 'Ready for preprocessing');
+}
+
 // ==================== Upload Handlers ====================
 function handleDragOver(e) {
     e.preventDefault();
@@ -485,6 +1042,7 @@ async function handleFileUpload(file) {
         const result = await api.uploadFile(file);
         state.fileId = result.file_id;
         state.filename = result.filename;
+        state.uploadSource = 'h5ad';
 
         elements.progressFill.style.width = '60%';
         elements.progressText.textContent = 'Extracting metadata...';
@@ -496,7 +1054,7 @@ async function handleFileUpload(file) {
         elements.progressFill.style.width = '100%';
         elements.progressText.textContent = 'Complete!';
 
-        // Show QC section (next step after upload)
+        // h5ad path: skip upstream QC steps, go straight to doublet detection
         setTimeout(() => {
             showQcSection(metadata);
         }, 500);
@@ -606,8 +1164,8 @@ async function handleFilterDoublets() {
         // Update QC banner with new cell count
         elements.qcCellCount.textContent = formatNumber(result.n_remaining);
 
-        // Show annotation section
-        showAnnotationSection();
+        // Route based on upload source
+        advanceAfterDoublets();
     } catch (error) {
         hideLoading();
         showError(error.message);
@@ -615,12 +1173,20 @@ async function handleFilterDoublets() {
 }
 
 function handleSkipQc() {
-    showAnnotationSection();
+    advanceAfterDoublets();
 }
 
 function handleKeepDoublets() {
-    // Continue without filtering
-    showAnnotationSection();
+    advanceAfterDoublets();
+}
+
+function advanceAfterDoublets() {
+    // If Cell Ranger path, go to preprocessing; otherwise skip to annotation
+    if (state.uploadSource === '10x') {
+        showPreprocessSection();
+    } else {
+        showAnnotationSection();
+    }
 }
 
 // ==================== Annotation Section ====================
@@ -1458,6 +2024,9 @@ function resetApplication() {
     state.filename = null;
     state.metadata = null;
     state.results = null;
+    state.uploadSource = null;
+    state.tenxFiles = { barcodes: null, features: null, matrix: null };
+    state.qcPlotData = null;
     state.doubletResults = null;
     state.annotationResults = null;
     state.doubletsFiltered = false;
@@ -1466,6 +2035,16 @@ function resetApplication() {
     // Reset UI - hide all sections except upload
     elements.uploadProgress.hidden = true;
     elements.progressFill.style.width = '0%';
+    elements.uploadProgress10x.hidden = true;
+    elements.progressFill10x.style.width = '0%';
+    elements.uploadProgressH5.hidden = true;
+    elements.progressFillH5.style.width = '0%';
+    elements.tenxFileList.hidden = true;
+    elements.tenxUploadActions.hidden = true;
+    elements.upload10xBtn.disabled = true;
+    elements.qcVisualizationSection.hidden = true;
+    elements.filterResultsSection.hidden = true;
+    elements.preprocessSection.hidden = true;
     elements.qcSection.hidden = true;
     elements.qcResults.hidden = true;
     elements.annotationSection.hidden = true;
@@ -1535,14 +2114,65 @@ async function init() {
 
     // Setup event listeners
 
-    // Upload zone
+    // Upload tabs
+    elements.tab10x.addEventListener('click', () => handleTabSwitch('10x'));
+    elements.tabH5.addEventListener('click', () => handleTabSwitch('h5'));
+    elements.tabH5ad.addEventListener('click', () => handleTabSwitch('h5ad'));
+
+    // 10x upload zone
+    elements.uploadZone10x.addEventListener('click', (e) => {
+        if (e.target.closest('.btn')) return; // Don't trigger file picker on button clicks
+        elements.fileInput10x.click();
+    });
+    elements.uploadZone10x.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); elements.uploadZone10x.classList.add('drag-over'); });
+    elements.uploadZone10x.addEventListener('dragleave', (e) => { e.preventDefault(); e.stopPropagation(); elements.uploadZone10x.classList.remove('drag-over'); });
+    elements.uploadZone10x.addEventListener('drop', handle10xDrop);
+    elements.fileInput10x.addEventListener('change', handle10xFileSelect);
+    elements.upload10xBtn.addEventListener('click', handleUpload10x);
+
+    // H5 upload zone
+    elements.uploadZoneH5.addEventListener('click', () => elements.fileInputH5.click());
+    elements.uploadZoneH5.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); elements.uploadZoneH5.classList.add('drag-over'); });
+    elements.uploadZoneH5.addEventListener('dragleave', (e) => { e.preventDefault(); e.stopPropagation(); elements.uploadZoneH5.classList.remove('drag-over'); });
+    elements.uploadZoneH5.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        elements.uploadZoneH5.classList.remove('drag-over');
+        const files = e.dataTransfer.files;
+        if (files.length > 0 && files[0].name.toLowerCase().endsWith('.h5')) {
+            handleUploadH5(files[0]);
+        } else {
+            showError('Please drop a .h5 file');
+        }
+    });
+    elements.fileInputH5.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            handleUploadH5(e.target.files[0]);
+        }
+    });
+
+    // h5ad upload zone
     elements.uploadZone.addEventListener('click', () => elements.fileInput.click());
     elements.uploadZone.addEventListener('dragover', handleDragOver);
     elements.uploadZone.addEventListener('dragleave', handleDragLeave);
     elements.uploadZone.addEventListener('drop', handleDrop);
     elements.fileInput.addEventListener('change', handleFileSelect);
 
-    // QC section
+    // QC Visualization threshold controls
+    syncSliderToInput('threshMinGenes', 'threshMinGenesVal');
+    syncSliderToInput('threshMinCounts', 'threshMinCountsVal');
+    syncSliderToInput('threshMaxMt', 'threshMaxMtVal');
+    syncSliderToInput('threshMaxRibo', 'threshMaxRiboVal');
+    elements.applyFiltersBtn.addEventListener('click', handleApplyFilters);
+
+    // Filter Results
+    elements.continueToDoubletBtn.addEventListener('click', handleContinueToDoublet);
+
+    // Preprocessing
+    elements.runPreprocessBtn.addEventListener('click', handleRunPreprocess);
+    elements.continueToAnnotationBtn.addEventListener('click', handleContinueToAnnotation);
+
+    // QC section (doublet detection)
     elements.runScrubletBtn.addEventListener('click', handleRunScrublet);
     elements.skipQcBtn.addEventListener('click', handleSkipQc);
     elements.filterDoubletsBtn.addEventListener('click', handleFilterDoublets);

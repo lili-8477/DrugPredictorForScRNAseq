@@ -46,6 +46,15 @@ from .annotation import (
 
 from .umap import compute_umap
 
+from .preprocessing import (
+    read_10x_mtx,
+    read_10x_h5,
+    compute_qc_metrics,
+    get_qc_plot_data,
+    apply_qc_filters,
+    run_preprocessing,
+)
+
 __all__ = [
     # Metadata
     'convert_to_json_serializable',
@@ -73,4 +82,11 @@ __all__ = [
     'CELLTYPIST_MODELS',
     # UMAP
     'compute_umap',
+    # Preprocessing
+    'read_10x_mtx',
+    'read_10x_h5',
+    'compute_qc_metrics',
+    'get_qc_plot_data',
+    'apply_qc_filters',
+    'run_preprocessing',
 ]

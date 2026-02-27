@@ -56,39 +56,277 @@
                     <div class="step-number">1</div>
                     <div class="step-info">
                         <h2>Upload Data</h2>
-                        <p>Upload your single-cell RNA-seq data in AnnData format (.h5ad)</p>
+                        <p>Upload Cell Ranger output or a preprocessed .h5ad file</p>
                     </div>
                 </div>
 
-                <div class="upload-zone" id="uploadZone">
-                    <div class="upload-content">
-                        <div class="upload-icon">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="1.5">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                <polyline points="17,8 12,3 7,8" />
-                                <line x1="12" y1="3" x2="12" y2="15" />
-                            </svg>
+                <!-- Upload Type Toggle -->
+                <div class="upload-tabs">
+                    <button class="upload-tab active" id="tab10x" data-tab="10x">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                        </svg>
+                        Cell Ranger Directory
+                    </button>
+                    <button class="upload-tab" id="tabH5" data-tab="h5">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                            <polyline points="14,2 14,8 20,8"/>
+                        </svg>
+                        Cell Ranger H5
+                    </button>
+                    <button class="upload-tab" id="tabH5ad" data-tab="h5ad">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                            <polyline points="14,2 14,8 20,8"/>
+                        </svg>
+                        .h5ad File
+                    </button>
+                </div>
+
+                <!-- Cell Ranger Upload -->
+                <div class="upload-panel" id="panel10x">
+                    <div class="upload-zone upload-zone-10x" id="uploadZone10x">
+                        <div class="upload-content">
+                            <div class="upload-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                                </svg>
+                            </div>
+                            <p class="upload-text">Upload Cell Ranger files</p>
+                            <p class="upload-subtext">Select all 3 files: barcodes.tsv.gz, features.tsv.gz, matrix.mtx.gz</p>
+                            <input type="file" id="fileInput10x" accept=".gz" multiple hidden>
                         </div>
-                        <p class="upload-text">Drag & drop your .h5ad file here</p>
-                        <p class="upload-subtext">or click to browse</p>
-                        <input type="file" id="fileInput" accept=".h5ad" hidden>
+                        <div class="tenx-file-list" id="tenxFileList" hidden>
+                            <div class="tenx-file-item" id="tenxBarcodes"><span class="tenx-file-icon pending">?</span> barcodes.tsv.gz</div>
+                            <div class="tenx-file-item" id="tenxFeatures"><span class="tenx-file-icon pending">?</span> features.tsv.gz</div>
+                            <div class="tenx-file-item" id="tenxMatrix"><span class="tenx-file-icon pending">?</span> matrix.mtx.gz</div>
+                        </div>
+                        <div class="action-bar action-bar-left" id="tenxUploadActions" hidden style="margin-top: var(--space-4);">
+                            <button class="btn btn-primary" id="upload10xBtn" disabled>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                                    <polyline points="17,8 12,3 7,8"/>
+                                    <line x1="12" y1="3" x2="12" y2="15"/>
+                                </svg>
+                                Upload &amp; Load
+                            </button>
+                        </div>
                     </div>
-                    <div class="upload-progress" id="uploadProgress" hidden>
+                    <div class="upload-progress" id="uploadProgress10x" hidden>
                         <div class="progress-bar">
-                            <div class="progress-fill" id="progressFill"></div>
+                            <div class="progress-fill" id="progressFill10x"></div>
                         </div>
-                        <span class="progress-text" id="progressText">Uploading...</span>
+                        <span class="progress-text" id="progressText10x">Uploading...</span>
+                    </div>
+                </div>
+
+                <!-- Cell Ranger H5 Upload -->
+                <div class="upload-panel" id="panelH5" hidden>
+                    <div class="upload-zone" id="uploadZoneH5">
+                        <div class="upload-content">
+                            <div class="upload-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                                    <polyline points="14,2 14,8 20,8"/>
+                                </svg>
+                            </div>
+                            <p class="upload-text">Upload Cell Ranger .h5 file</p>
+                            <p class="upload-subtext">e.g. filtered_feature_bc_matrix.h5</p>
+                            <input type="file" id="fileInputH5" accept=".h5" hidden>
+                        </div>
+                    </div>
+                    <div class="upload-progress" id="uploadProgressH5" hidden>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFillH5"></div>
+                        </div>
+                        <span class="progress-text" id="progressTextH5">Uploading...</span>
+                    </div>
+                </div>
+
+                <!-- h5ad Upload (existing) -->
+                <div class="upload-panel" id="panelH5ad" hidden>
+                    <div class="upload-zone" id="uploadZone">
+                        <div class="upload-content">
+                            <div class="upload-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="1.5">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="17,8 12,3 7,8" />
+                                    <line x1="12" y1="3" x2="12" y2="15" />
+                                </svg>
+                            </div>
+                            <p class="upload-text">Drag & drop your .h5ad file here</p>
+                            <p class="upload-subtext">or click to browse</p>
+                            <input type="file" id="fileInput" accept=".h5ad" hidden>
+                        </div>
+                        <div class="upload-progress" id="uploadProgress" hidden>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="progressFill"></div>
+                            </div>
+                            <span class="progress-text" id="progressText">Uploading...</span>
+                        </div>
                     </div>
                 </div>
             </section>
 
-            <!-- Step 2: Quality Control -->
-            <section class="step-section" id="qcSection" hidden>
+            <!-- Step 2: QC Visualization (NEW - Cell Ranger path only) -->
+            <section class="step-section" id="qcVisualizationSection" hidden>
                 <div class="step-header">
                     <div class="step-number">2</div>
                     <div class="step-info">
-                        <h2>Quality Control</h2>
+                        <h2>QC Metrics & Visualization</h2>
+                        <p>Review quality metrics and set filtering thresholds</p>
+                    </div>
+                </div>
+
+                <!-- QC Summary Stats Bar -->
+                <div class="file-summary-banner" id="qcVizSummaryBanner">
+                    <span class="file-badge" id="qcVizFilenameBadge">cellranger_data.h5ad</span>
+                    <div class="file-summary-stats">
+                        <span><strong id="qcVizCellCount">-</strong> cells</span>
+                        <span class="stat-separator">|</span>
+                        <span><strong id="qcVizGeneCount">-</strong> genes</span>
+                        <span class="stat-separator">|</span>
+                        <span>Median genes: <strong id="qcVizMedianGenes">-</strong></span>
+                        <span class="stat-separator">|</span>
+                        <span>Median UMI: <strong id="qcVizMedianUmi">-</strong></span>
+                        <span class="stat-separator">|</span>
+                        <span>Median %MT: <strong id="qcVizMedianMt">-</strong></span>
+                    </div>
+                </div>
+
+                <!-- QC Violin Plots -->
+                <div class="card qc-viz-card">
+                    <div class="card-header">
+                        <h3>QC Distributions</h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="qc-plot-grid">
+                            <div id="violinNcounts" class="qc-plot-cell"></div>
+                            <div id="violinNgenes" class="qc-plot-cell"></div>
+                            <div id="violinPctMt" class="qc-plot-cell"></div>
+                            <div id="violinPctRibo" class="qc-plot-cell"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- QC Scatter Plots -->
+                <div class="card qc-viz-card" style="margin-top: var(--space-4);">
+                    <div class="card-header">
+                        <h3>QC Scatter Plots</h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="qc-scatter-grid">
+                            <div id="scatterCountsGenes" class="qc-scatter-cell"></div>
+                            <div id="scatterGenesMt" class="qc-scatter-cell"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Interactive Threshold Controls -->
+                <div class="card qc-viz-card" style="margin-top: var(--space-4);">
+                    <div class="card-header">
+                        <h3>Filtering Thresholds</h3>
+                        <div class="cells-passing-badge" id="cellsPassingBadge">
+                            <span id="cellsPassingCount">-</span> / <span id="cellsTotalCount">-</span> cells passing
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <div class="threshold-grid">
+                            <div class="threshold-control">
+                                <label for="threshMinGenes">Min Genes per Cell</label>
+                                <div class="threshold-slider-row">
+                                    <input type="range" id="threshMinGenes" class="threshold-slider" min="0" max="5000" value="250" step="10">
+                                    <input type="number" id="threshMinGenesVal" class="threshold-value-input" value="250" min="0" max="50000">
+                                </div>
+                            </div>
+                            <div class="threshold-control">
+                                <label for="threshMinCounts">Min UMI Counts</label>
+                                <div class="threshold-slider-row">
+                                    <input type="range" id="threshMinCounts" class="threshold-slider" min="0" max="20000" value="500" step="50">
+                                    <input type="number" id="threshMinCountsVal" class="threshold-value-input" value="500" min="0" max="500000">
+                                </div>
+                            </div>
+                            <div class="threshold-control">
+                                <label for="threshMaxMt">Max %Mitochondrial</label>
+                                <div class="threshold-slider-row">
+                                    <input type="range" id="threshMaxMt" class="threshold-slider" min="0" max="100" value="20" step="0.5">
+                                    <input type="number" id="threshMaxMtVal" class="threshold-value-input" value="20" min="0" max="100" step="0.5">
+                                </div>
+                            </div>
+                            <div class="threshold-control">
+                                <label for="threshMaxRibo">Max %Ribosomal</label>
+                                <div class="threshold-slider-row">
+                                    <input type="range" id="threshMaxRibo" class="threshold-slider" min="0" max="100" value="50" step="0.5">
+                                    <input type="number" id="threshMaxRiboVal" class="threshold-value-input" value="50" min="0" max="100" step="0.5">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="action-bar action-bar-left">
+                            <button class="btn btn-primary" id="applyFiltersBtn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/>
+                                </svg>
+                                Apply Filters
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 3: Filtering Results (NEW) -->
+            <section class="step-section" id="filterResultsSection" hidden>
+                <div class="step-header">
+                    <div class="step-number">3</div>
+                    <div class="step-info">
+                        <h2>Filtering Results</h2>
+                        <p>Review the effects of quality filtering</p>
+                    </div>
+                </div>
+
+                <div class="card filter-results-card">
+                    <div class="card-header">
+                        <h3>Before / After Comparison</h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="before-after-grid">
+                            <div class="before-after-item">
+                                <span class="before-after-label">Cells</span>
+                                <span class="before-after-before" id="filterCellsBefore">-</span>
+                                <span class="before-after-arrow">&rarr;</span>
+                                <span class="before-after-after" id="filterCellsAfter">-</span>
+                                <span class="before-after-removed" id="filterCellsRemoved">(-)</span>
+                            </div>
+                            <div class="before-after-item">
+                                <span class="before-after-label">Genes</span>
+                                <span class="before-after-before" id="filterGenesBefore">-</span>
+                                <span class="before-after-arrow">&rarr;</span>
+                                <span class="before-after-after" id="filterGenesAfter">-</span>
+                                <span class="before-after-removed" id="filterGenesRemoved">(-)</span>
+                            </div>
+                        </div>
+
+                        <div class="action-bar action-bar-left">
+                            <button class="btn btn-primary" id="continueToDoubletBtn">
+                                Continue to Doublet Detection
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="5" y1="12" x2="19" y2="12"/>
+                                    <polyline points="12,5 19,12 12,19"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 4: Doublet Detection -->
+            <section class="step-section" id="qcSection" hidden>
+                <div class="step-header">
+                    <div class="step-number">4</div>
+                    <div class="step-info">
+                        <h2>Doublet Detection</h2>
                         <p>Detect and remove doublets using Scrublet</p>
                     </div>
                 </div>
@@ -213,10 +451,95 @@
                 </div>
             </section>
 
-            <!-- Step 3: Cell Type Annotation -->
+            <!-- Step 5: Preprocessing (NEW - Cell Ranger path only) -->
+            <section class="step-section" id="preprocessSection" hidden>
+                <div class="step-header">
+                    <div class="step-number">5</div>
+                    <div class="step-info">
+                        <h2>Preprocessing</h2>
+                        <p>Normalize, log-transform, and select highly variable genes</p>
+                    </div>
+                </div>
+
+                <div class="card preprocess-card">
+                    <div class="card-header">
+                        <h3>Normalization Pipeline</h3>
+                        <span class="badge badge-info">Scanpy</span>
+                    </div>
+                    <div class="card-content">
+                        <div class="preprocess-steps-preview">
+                            <div class="preprocess-step-item">
+                                <span class="preprocess-step-num">1</span>
+                                <span>Store raw counts in <code>adata.raw</code></span>
+                            </div>
+                            <div class="preprocess-step-item">
+                                <span class="preprocess-step-num">2</span>
+                                <span>Normalize to 10,000 counts per cell</span>
+                            </div>
+                            <div class="preprocess-step-item">
+                                <span class="preprocess-step-num">3</span>
+                                <span>Log1p transform</span>
+                            </div>
+                            <div class="preprocess-step-item">
+                                <span class="preprocess-step-num">4</span>
+                                <span>Select 2,000 highly variable genes</span>
+                            </div>
+                        </div>
+                        <div class="action-bar action-bar-left">
+                            <button class="btn btn-primary" id="runPreprocessBtn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polygon points="5,3 19,12 5,21"/>
+                                </svg>
+                                Run Preprocessing
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Preprocessing Results -->
+                <div id="preprocessResults" hidden>
+                    <div class="card" style="margin-top: var(--space-4);">
+                        <div class="card-header">
+                            <h3>Preprocessing Complete</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="stat-grid stat-grid-4">
+                                <div class="stat-item">
+                                    <span class="stat-value" id="prepCells">-</span>
+                                    <span class="stat-label">Cells</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="prepGenes">-</span>
+                                    <span class="stat-label">Total Genes</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="prepHvg">-</span>
+                                    <span class="stat-label">HVG Selected</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value stat-value-small" id="prepNormStatus">Normalized</span>
+                                    <span class="stat-label">Status</span>
+                                </div>
+                            </div>
+                            <div id="prepStepsList" style="margin-top: var(--space-4); font-size: 0.8125rem; color: var(--text-400);"></div>
+                            <div class="action-bar action-bar-left">
+                                <button class="btn btn-primary" id="continueToAnnotationBtn">
+                                    Continue to Cell Type Annotation
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <line x1="5" y1="12" x2="19" y2="12"/>
+                                        <polyline points="12,5 19,12 12,19"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 6: Cell Type Annotation -->
             <section class="step-section" id="annotationSection" hidden>
                 <div class="step-header">
-                    <div class="step-number">3</div>
+                    <div class="step-number">6</div>
                     <div class="step-info">
                         <h2>Cell Type Annotation</h2>
                         <p>Automatically annotate cell types using CellTypist pre-trained models</p>
@@ -467,10 +790,10 @@
                 </div>
             </section>
 
-            <!-- Step 4: UMAP Visualization -->
+            <!-- Step 7: UMAP Visualization -->
             <section class="step-section" id="umapSection" hidden>
                 <div class="step-header">
-                    <div class="step-number">4</div>
+                    <div class="step-number">7</div>
                     <div class="step-info">
                         <h2>UMAP Visualization</h2>
                         <p>Visualize cell populations in reduced dimensional space</p>
@@ -557,10 +880,10 @@
                 </div>
             </section>
 
-            <!-- Step 5: Configure Drug Prediction -->
+            <!-- Step 8: Configure Drug Prediction -->
             <section class="step-section" id="metadataSection" hidden>
                 <div class="step-header">
-                    <div class="step-number">5</div>
+                    <div class="step-number">8</div>
                     <div class="step-info">
                         <h2>Configure Drug Prediction</h2>
                         <p>Select cell populations for compound prediction</p>
@@ -650,10 +973,10 @@
                 </div>
             </section>
 
-            <!-- Step 6: Results -->
+            <!-- Step 9: Results -->
             <section class="step-section" id="resultsSection" hidden>
                 <div class="step-header">
-                    <div class="step-number">6</div>
+                    <div class="step-number">9</div>
                     <div class="step-info">
                         <h2>Compound Predictions</h2>
                         <p id="resultsSummary">Ranked compounds that may induce the desired state transition</p>

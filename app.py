@@ -7,6 +7,7 @@ import os
 import atexit
 import glob
 import uuid
+import shutil
 import traceback
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
@@ -51,6 +52,13 @@ def cleanup_all_uploads():
     for f in glob.glob(os.path.join(UPLOAD_FOLDER, '*.h5ad')):
         try:
             os.remove(f)
+        except OSError:
+            pass
+
+    # Clean any 10x temp directories left in uploads/
+    for d in glob.glob(os.path.join(UPLOAD_FOLDER, '*_10x')):
+        try:
+            shutil.rmtree(d, ignore_errors=True)
         except OSError:
             pass
 
@@ -196,6 +204,242 @@ def get_metadata(file_id):
     except Exception as e:
         return jsonify({
             'error': f'Failed to read file: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+# ============== Upstream Preprocessing Endpoints ==============
+
+@app.route('/api/upload-10x', methods=['POST'])
+def upload_10x():
+    """Handle Cell Ranger filtered_feature_bc_matrix upload (3 files)"""
+    required_files = ['barcodes', 'features', 'matrix']
+    uploaded = {}
+
+    for key in required_files:
+        if key not in request.files:
+            return jsonify({'error': f'Missing file: {key}'}), 400
+        uploaded[key] = request.files[key]
+
+    # Generate unique file ID and temp directory
+    file_id = str(uuid.uuid4())
+    temp_dir = os.path.join(UPLOAD_FOLDER, f"{file_id}_10x")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    try:
+        # Save the 3 files with standard names
+        file_map = {
+            'barcodes': 'barcodes.tsv.gz',
+            'features': 'features.tsv.gz',
+            'matrix': 'matrix.mtx.gz',
+        }
+        for key, standard_name in file_map.items():
+            uploaded[key].save(os.path.join(temp_dir, standard_name))
+
+        # Read into AnnData
+        from utils.preprocessing import read_10x_mtx
+        adata = read_10x_mtx(temp_dir)
+
+        # Save as h5ad
+        h5ad_path = os.path.join(UPLOAD_FOLDER, f"{file_id}_cellranger.h5ad")
+        adata.write_h5ad(h5ad_path)
+
+        # Store file info
+        file_store[file_id] = {
+            'filename': 'cellranger_data.h5ad',
+            'filepath': h5ad_path,
+            'source': '10x',
+            'uploaded_at': pd.Timestamp.now().isoformat()
+        }
+
+        # Clean up temp directory
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+        return jsonify({
+            'file_id': file_id,
+            'filename': 'cellranger_data.h5ad',
+            'source': '10x',
+            'n_cells': int(adata.n_obs),
+            'n_genes': int(adata.n_vars),
+            'message': 'Cell Ranger data loaded successfully'
+        })
+
+    except Exception as e:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return jsonify({
+            'error': f'Failed to read Cell Ranger data: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+@app.route('/api/upload-10x-h5', methods=['POST'])
+def upload_10x_h5():
+    """Handle Cell Ranger .h5 file upload"""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    if not file.filename.lower().endswith('.h5'):
+        return jsonify({'error': 'Invalid file type. Only .h5 files are allowed'}), 400
+
+    file_id = str(uuid.uuid4())
+    filename = secure_filename(file.filename)
+    h5_path = os.path.join(UPLOAD_FOLDER, f"{file_id}_{filename}")
+
+    try:
+        file.save(h5_path)
+
+        from utils.preprocessing import read_10x_h5
+        adata = read_10x_h5(h5_path)
+
+        # Save as h5ad
+        h5ad_path = os.path.join(UPLOAD_FOLDER, f"{file_id}_cellranger.h5ad")
+        adata.write_h5ad(h5ad_path)
+
+        # Remove the original .h5 file
+        os.remove(h5_path)
+
+        file_store[file_id] = {
+            'filename': filename,
+            'filepath': h5ad_path,
+            'source': '10x',
+            'uploaded_at': pd.Timestamp.now().isoformat()
+        }
+
+        return jsonify({
+            'file_id': file_id,
+            'filename': filename,
+            'source': '10x',
+            'n_cells': int(adata.n_obs),
+            'n_genes': int(adata.n_vars),
+            'message': 'Cell Ranger H5 data loaded successfully'
+        })
+
+    except Exception as e:
+        # Clean up on failure
+        if os.path.exists(h5_path):
+            os.remove(h5_path)
+        return jsonify({
+            'error': f'Failed to read Cell Ranger H5 file: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+@app.route('/api/qc-metrics/<file_id>', methods=['POST'])
+def compute_qc_metrics_endpoint(file_id):
+    """Compute QC metrics and return plot data"""
+    if file_id not in file_store:
+        return jsonify({'error': 'File not found'}), 404
+
+    filepath = file_store[file_id]['filepath']
+
+    try:
+        import anndata as ad
+        from utils.preprocessing import compute_qc_metrics, get_qc_plot_data
+
+        adata = ad.read_h5ad(filepath)
+
+        # Compute QC metrics
+        qc_info = compute_qc_metrics(adata)
+
+        # Get plot data
+        plot_data = get_qc_plot_data(adata)
+
+        # Save adata with QC annotations
+        adata.write_h5ad(filepath)
+
+        return jsonify({
+            'success': True,
+            'qc_info': qc_info,
+            'plot_data': plot_data
+        })
+
+    except Exception as e:
+        return jsonify({
+            'error': f'QC metrics computation failed: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+@app.route('/api/qc-filter', methods=['POST'])
+def apply_qc_filter():
+    """Apply user-chosen QC thresholds"""
+    data = request.get_json()
+    file_id = data.get('file_id')
+
+    if not file_id or file_id not in file_store:
+        return jsonify({'error': 'File not found'}), 404
+
+    filepath = file_store[file_id]['filepath']
+
+    try:
+        import anndata as ad
+        from utils.preprocessing import apply_qc_filters
+
+        adata = ad.read_h5ad(filepath)
+
+        # Apply filters with user thresholds
+        adata_filtered, summary = apply_qc_filters(
+            adata,
+            min_genes=int(data.get('min_genes', 250)),
+            min_counts=int(data.get('min_counts', 500)),
+            max_pct_mt=float(data.get('max_pct_mt', 20.0)),
+            max_pct_ribo=float(data.get('max_pct_ribo', 50.0)),
+            min_cells_per_gene=int(data.get('min_cells_per_gene', 3))
+        )
+
+        # Save filtered data
+        adata_filtered.write_h5ad(filepath)
+
+        return jsonify({
+            'success': True,
+            'summary': summary
+        })
+
+    except Exception as e:
+        return jsonify({
+            'error': f'QC filtering failed: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+@app.route('/api/preprocess', methods=['POST'])
+def run_preprocess():
+    """Run normalization + HVG pipeline on filtered data"""
+    data = request.get_json()
+    file_id = data.get('file_id')
+
+    if not file_id or file_id not in file_store:
+        return jsonify({'error': 'File not found'}), 404
+
+    filepath = file_store[file_id]['filepath']
+
+    try:
+        import anndata as ad
+        from utils.preprocessing import run_preprocessing
+
+        adata = ad.read_h5ad(filepath)
+
+        # Run preprocessing pipeline
+        adata, steps = run_preprocessing(adata)
+
+        # Save preprocessed data
+        adata.write_h5ad(filepath)
+
+        return jsonify({
+            'success': True,
+            'steps': steps,
+            'n_cells': int(adata.n_obs),
+            'n_genes': int(adata.n_vars),
+            'n_hvg': int(adata.var['highly_variable'].sum()) if 'highly_variable' in adata.var.columns else None
+        })
+
+    except Exception as e:
+        return jsonify({
+            'error': f'Preprocessing failed: {str(e)}',
             'traceback': traceback.format_exc()
         }), 500
 
