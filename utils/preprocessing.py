@@ -250,6 +250,14 @@ def run_preprocessing(adata):
     adata.raw = adata
     steps.append('Stored raw counts in adata.raw')
 
+    # Preserve raw counts in layers for scVI integration
+    import scipy.sparse as _sp
+    if _sp.issparse(adata.X):
+        adata.layers['counts'] = adata.X.copy()
+    else:
+        adata.layers['counts'] = adata.X.copy()
+    steps.append('Saved raw counts to layers["counts"]')
+
     # Normalize
     sc.pp.normalize_total(adata, target_sum=1e4)
     steps.append('Normalized to 10,000 counts per cell')

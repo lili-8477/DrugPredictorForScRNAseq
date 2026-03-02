@@ -1672,3 +1672,177 @@ body {
     color: white;
     flex-shrink: 0;
 }
+
+/* ==================== Mode Toggle ==================== */
+.mode-toggle-container {
+    margin-bottom: var(--space-6);
+}
+
+.mode-toggle {
+    display: inline-flex;
+    gap: var(--space-2);
+    padding: var(--space-1);
+    background: var(--bg-800);
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.mode-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-5);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-md);
+    color: var(--text-400);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.mode-btn:hover {
+    color: var(--text-200);
+}
+
+.mode-btn.active {
+    background: var(--gradient-primary);
+    color: white;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+}
+
+/* ==================== Batch Manager ==================== */
+.batch-label-input {
+    width: 140px !important;
+    padding: var(--space-2) var(--space-3) !important;
+    font-size: 0.875rem !important;
+}
+
+.batch-status-badge {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-md);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.badge-success {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--success-500);
+}
+
+.badge-warning {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--warning-500);
+}
+
+.badge-error {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--error-500);
+}
+
+/* ==================== Integration Method Cards ==================== */
+.integration-methods {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-4);
+}
+
+@media (max-width: 640px) {
+    .integration-methods {
+        grid-template-columns: 1fr;
+    }
+}
+
+.integration-method-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-5);
+    background: var(--bg-800);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    position: relative;
+}
+
+.integration-method-card:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.integration-method-card.active {
+    border-color: var(--primary-500);
+    background: rgba(99, 102, 241, 0.08);
+}
+
+.integration-method-card.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.integration-method-card input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.method-card-content {
+    flex: 1;
+}
+
+.method-card-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-100);
+    margin-bottom: var(--space-1);
+}
+
+.method-card-desc {
+    font-size: 0.8125rem;
+    color: var(--text-400);
+    line-height: 1.4;
+}
+
+.method-availability-badge {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    align-self: flex-start;
+}
+
+.method-availability-badge.available {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--success-500);
+}
+
+.method-availability-badge.unavailable {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--error-500);
+}
+
+/* ==================== scVI Params ==================== */
+.scvi-params .text-input {
+    width: 120px;
+}
+
+/* ==================== Integration Progress ==================== */
+.integration-progress .progress-bar {
+    height: 8px;
+    background: var(--bg-700);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.integration-progress .progress-fill {
+    height: 100%;
+    background: var(--gradient-primary);
+    transition: width 0.5s ease;
+}

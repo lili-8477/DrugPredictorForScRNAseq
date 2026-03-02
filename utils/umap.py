@@ -57,10 +57,17 @@ def compute_umap(adata, force_recompute=False):
         sc.tl.pca(adata, n_comps=n_comps, use_highly_variable=True)
         steps_performed.append(f'PCA with {n_comps} components')
 
-        # Neighbors
-        n_pcs = min(40, n_comps)
-        sc.pp.neighbors(adata, n_neighbors=15, n_pcs=n_pcs)
-        steps_performed.append('Computed neighbor graph (n_neighbors=15)')
+        # Neighbors — use batch-corrected embeddings if available
+        if 'X_scVI' in adata.obsm:
+            sc.pp.neighbors(adata, use_rep='X_scVI', n_neighbors=15)
+            steps_performed.append('Computed neighbor graph from scVI embedding (n_neighbors=15)')
+        elif 'X_scanorama' in adata.obsm:
+            sc.pp.neighbors(adata, use_rep='X_scanorama', n_neighbors=15)
+            steps_performed.append('Computed neighbor graph from Scanorama embedding (n_neighbors=15)')
+        else:
+            n_pcs = min(40, n_comps)
+            sc.pp.neighbors(adata, n_neighbors=15, n_pcs=n_pcs)
+            steps_performed.append('Computed neighbor graph (n_neighbors=15)')
 
         # UMAP
         sc.tl.umap(adata)

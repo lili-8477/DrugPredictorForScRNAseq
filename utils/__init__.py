@@ -55,6 +55,15 @@ from .preprocessing import (
     run_preprocessing,
 )
 
+from .integration import (
+    concat_samples,
+    run_scanorama_integration,
+    run_scvi_integration,
+    get_integration_summary,
+    SCANORAMA_AVAILABLE,
+    SCVI_AVAILABLE,
+)
+
 __all__ = [
     # Metadata
     'convert_to_json_serializable',
@@ -89,4 +98,11 @@ __all__ = [
     'get_qc_plot_data',
     'apply_qc_filters',
     'run_preprocessing',
+    # Integration
+    'concat_samples',
+    'run_scanorama_integration',
+    'run_scvi_integration',
+    'get_integration_summary',
+    'SCANORAMA_AVAILABLE',
+    'SCVI_AVAILABLE',
 ]

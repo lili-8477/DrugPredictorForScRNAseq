@@ -9,6 +9,7 @@ import glob
 import uuid
 import shutil
 import traceback
+import threading
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
@@ -34,6 +35,12 @@ CORS(app)
 
 # Store file metadata in memory (for MVP - use database in production)
 file_store = {}
+
+# Multi-batch project store
+project_store = {}
+
+# Background integration thread tracking
+integration_threads = {}
 
 
 def cleanup_all_uploads():
@@ -123,6 +130,24 @@ def get_status():
         celltypist_available = False
         celltypist_version = None
 
+    # Check if scanorama is available
+    try:
+        import scanorama as _scanorama
+        scanorama_available = True
+        scanorama_version = getattr(_scanorama, '__version__', 'unknown')
+    except ImportError:
+        scanorama_available = False
+        scanorama_version = None
+
+    # Check if scvi-tools is available
+    try:
+        import scvi as _scvi
+        scvi_available = True
+        scvi_version = getattr(_scvi, '__version__', 'unknown')
+    except ImportError:
+        scvi_available = False
+        scvi_version = None
+
     return jsonify({
         'status': 'ok' if (checkpoints_ok and dr_available) else 'incomplete',
         'drugreflector': {
@@ -145,6 +170,14 @@ def get_status():
             'available': checkpoints_ok,
             'missing': missing,
             'directory': CHECKPOINT_DIR
+        },
+        'scanorama': {
+            'available': scanorama_available,
+            'version': scanorama_version
+        },
+        'scvi': {
+            'available': scvi_available,
+            'version': scvi_version
         }
     })
 
@@ -939,6 +972,268 @@ def cleanup_all():
     cleanup_all_uploads()
     return jsonify({'message': 'All uploads cleaned up'})
 
+# ============== Multi-Batch Integration Endpoints ==============
+
+@app.route('/api/project/create', methods=['POST'])
+def create_project():
+    """Create a new multi-batch project"""
+    project_id = str(uuid.uuid4())
+    project_store[project_id] = {
+        'samples': [],  # list of {file_id, batch_label, filename, status}
+        'merged_file_id': None,
+        'integration_method': None,
+        'integration_status': None,
+        'created_at': pd.Timestamp.now().isoformat(),
+    }
+    return jsonify({
+        'project_id': project_id,
+        'message': 'Project created'
+    })
+
+
+@app.route('/api/project/<project_id>', methods=['GET'])
+def get_project(project_id):
+    """Get project info including samples and status"""
+    if project_id not in project_store:
+        return jsonify({'error': 'Project not found'}), 404
+
+    project = project_store[project_id]
+    return jsonify({
+        'project_id': project_id,
+        'samples': project['samples'],
+        'merged_file_id': project['merged_file_id'],
+        'integration_method': project['integration_method'],
+        'integration_status': project['integration_status'],
+    })
+
+
+@app.route('/api/project/<project_id>/add-sample', methods=['POST'])
+def add_sample_to_project(project_id):
+    """Associate a file_id + batch_label with a project"""
+    if project_id not in project_store:
+        return jsonify({'error': 'Project not found'}), 404
+
+    data = request.get_json()
+    file_id = data.get('file_id')
+    batch_label = data.get('batch_label')
+
+    if not file_id or file_id not in file_store:
+        return jsonify({'error': 'File not found'}), 404
+    if not batch_label:
+        return jsonify({'error': 'batch_label is required'}), 400
+
+    # Check for duplicate batch labels
+    existing_labels = [s['batch_label'] for s in project_store[project_id]['samples']]
+    if batch_label in existing_labels:
+        return jsonify({'error': f'Batch label "{batch_label}" already exists in project'}), 400
+
+    project_store[project_id]['samples'].append({
+        'file_id': file_id,
+        'batch_label': batch_label,
+        'filename': file_store[file_id]['filename'],
+        'status': 'uploaded',  # uploaded -> qc_done -> preprocessed
+    })
+
+    return jsonify({
+        'success': True,
+        'n_samples': len(project_store[project_id]['samples']),
+    })
+
+
+@app.route('/api/project/<project_id>/remove-sample', methods=['POST'])
+def remove_sample_from_project(project_id):
+    """Remove a sample from a project"""
+    if project_id not in project_store:
+        return jsonify({'error': 'Project not found'}), 404
+
+    data = request.get_json()
+    file_id = data.get('file_id')
+
+    project = project_store[project_id]
+    project['samples'] = [s for s in project['samples'] if s['file_id'] != file_id]
+
+    return jsonify({
+        'success': True,
+        'n_samples': len(project['samples']),
+    })
+
+
+@app.route('/api/project/<project_id>/merge', methods=['POST'])
+def merge_project_samples(project_id):
+    """Concatenate all samples in a project"""
+    if project_id not in project_store:
+        return jsonify({'error': 'Project not found'}), 404
+
+    project = project_store[project_id]
+    samples = project['samples']
+
+    if len(samples) < 2:
+        return jsonify({'error': 'Need at least 2 samples to merge'}), 400
+
+    try:
+        from utils.integration import concat_samples
+
+        file_paths = []
+        batch_labels = []
+        for s in samples:
+            fid = s['file_id']
+            if fid not in file_store:
+                return jsonify({'error': f'File {fid} not found'}), 404
+            file_paths.append(file_store[fid]['filepath'])
+            batch_labels.append(s['batch_label'])
+
+        # Concatenate
+        merged_adata, merge_summary = concat_samples(file_paths, batch_labels)
+
+        # Save merged file
+        merged_file_id = str(uuid.uuid4())
+        merged_path = os.path.join(UPLOAD_FOLDER, f"{merged_file_id}_merged.h5ad")
+        merged_adata.write_h5ad(merged_path)
+
+        file_store[merged_file_id] = {
+            'filename': 'merged_samples.h5ad',
+            'filepath': merged_path,
+            'source': 'merged',
+            'uploaded_at': pd.Timestamp.now().isoformat(),
+        }
+
+        project['merged_file_id'] = merged_file_id
+
+        return jsonify({
+            'success': True,
+            'merged_file_id': merged_file_id,
+            'summary': merge_summary,
+        })
+
+    except Exception as e:
+        return jsonify({
+            'error': f'Merge failed: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+@app.route('/api/project/<project_id>/integrate', methods=['POST'])
+def integrate_project(project_id):
+    """Run batch integration (scVI or Scanorama) in a background thread"""
+    if project_id not in project_store:
+        return jsonify({'error': 'Project not found'}), 404
+
+    project = project_store[project_id]
+    merged_file_id = project.get('merged_file_id')
+
+    if not merged_file_id or merged_file_id not in file_store:
+        return jsonify({'error': 'No merged data found. Run merge first.'}), 400
+
+    data = request.get_json()
+    method = data.get('method', 'scanorama')
+    n_latent = int(data.get('n_latent', 30))
+    max_epochs = int(data.get('max_epochs', 400))
+
+    # Check if integration already running
+    if project_id in integration_threads:
+        thread_info = integration_threads[project_id]
+        if thread_info.get('thread') and thread_info['thread'].is_alive():
+            return jsonify({'error': 'Integration already running'}), 409
+
+    # Initialize status
+    integration_threads[project_id] = {
+        'status': 'running',
+        'method': method,
+        'progress': 0,
+        'message': f'Starting {method} integration...',
+        'error': None,
+        'result': None,
+        'thread': None,
+    }
+
+    def run_integration():
+        try:
+            import anndata as ad
+            filepath = file_store[merged_file_id]['filepath']
+            adata = ad.read_h5ad(filepath)
+
+            status = integration_threads[project_id]
+            status['progress'] = 10
+            status['message'] = 'Data loaded, running integration...'
+
+            if method == 'scanorama':
+                from utils.integration import run_scanorama_integration
+                from utils.metadata import is_log_normalized
+                # Scanorama needs log-normalized data
+                if not is_log_normalized(adata):
+                    import scanpy as sc
+                    sc.pp.normalize_total(adata, target_sum=1e4)
+                    sc.pp.log1p(adata)
+                status['progress'] = 30
+                result = run_scanorama_integration(adata)
+            elif method == 'scvi':
+                from utils.integration import run_scvi_integration
+                status['progress'] = 20
+                status['message'] = 'Training scVI model...'
+                result = run_scvi_integration(
+                    adata, n_latent=n_latent, max_epochs=max_epochs
+                )
+            else:
+                raise ValueError(f'Unknown integration method: {method}')
+
+            status['progress'] = 90
+            status['message'] = 'Saving results...'
+
+            # Save updated adata
+            adata.write_h5ad(filepath)
+
+            status['status'] = 'completed'
+            status['progress'] = 100
+            status['message'] = 'Integration complete'
+            status['result'] = result
+
+            project['integration_method'] = method
+            project['integration_status'] = 'completed'
+
+        except Exception as e:
+            status = integration_threads[project_id]
+            status['status'] = 'error'
+            status['error'] = str(e)
+            status['message'] = f'Integration failed: {str(e)}'
+            project['integration_status'] = 'error'
+
+    thread = threading.Thread(target=run_integration, daemon=True)
+    integration_threads[project_id]['thread'] = thread
+    thread.start()
+
+    return jsonify({
+        'success': True,
+        'message': f'{method} integration started',
+        'status': 'running',
+    })
+
+
+@app.route('/api/project/<project_id>/status', methods=['GET'])
+def get_integration_status(project_id):
+    """Poll integration progress"""
+    if project_id not in integration_threads:
+        return jsonify({
+            'status': 'idle',
+            'progress': 0,
+            'message': 'No integration running',
+        })
+
+    info = integration_threads[project_id]
+    response = {
+        'status': info['status'],
+        'method': info['method'],
+        'progress': info['progress'],
+        'message': info['message'],
+    }
+
+    if info['status'] == 'completed' and info['result']:
+        response['result'] = info['result']
+    if info['status'] == 'error' and info['error']:
+        response['error'] = info['error']
+
+    return jsonify(response)
+
+
 # ============== Main ==============
 
 if __name__ == '__main__':
@@ -979,6 +1274,18 @@ if __name__ == '__main__':
         print("  CellTypist installed")
     except ImportError:
         print("  CellTypist not installed. Run: pip install celltypist")
+
+    try:
+        import scanorama
+        print("  Scanorama installed")
+    except ImportError:
+        print("  Scanorama not installed (optional). Run: pip install scanorama")
+
+    try:
+        import scvi
+        print("  scvi-tools installed")
+    except ImportError:
+        print("  scvi-tools not installed (optional). Run: pip install scvi-tools")
 
     print("\n" + "=" * 60)
     print("Starting server at http://localhost:5001")

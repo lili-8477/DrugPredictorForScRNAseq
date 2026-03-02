@@ -50,6 +50,29 @@
 
         <!-- Main Content -->
         <main class="main-content">
+            <!-- Mode Toggle -->
+            <div class="mode-toggle-container" id="modeToggleContainer">
+                <div class="mode-toggle">
+                    <button class="mode-btn active" id="modeSingle" data-mode="single">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                            <polyline points="14,2 14,8 20,8"/>
+                        </svg>
+                        Single Sample
+                    </button>
+                    <button class="mode-btn" id="modeBatch" data-mode="batch">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="3" width="6" height="6" rx="1"/>
+                            <rect x="9" y="3" width="6" height="6" rx="1"/>
+                            <rect x="16" y="3" width="6" height="6" rx="1"/>
+                            <path d="M5 15v4a2 2 0 002 2h10a2 2 0 002-2v-4"/>
+                            <path d="M5 12l7 3 7-3"/>
+                        </svg>
+                        Multi-Batch
+                    </button>
+                </div>
+            </div>
+
             <!-- Step 1: Upload -->
             <section class="step-section" id="uploadSection">
                 <div class="step-header">
@@ -150,6 +173,146 @@
                                 <div class="progress-fill" id="progressFill"></div>
                             </div>
                             <span class="progress-text" id="progressText">Uploading...</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Batch Manager Panel (visible in multi-batch mode) -->
+            <section class="step-section" id="batchManagerSection" hidden>
+                <div class="step-header">
+                    <div class="step-number">B</div>
+                    <div class="step-info">
+                        <h2>Batch Manager</h2>
+                        <p>Manage multiple samples for batch integration</p>
+                    </div>
+                </div>
+
+                <!-- Sample Table -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Samples</h3>
+                        <button class="btn btn-secondary" id="batchAddSampleBtn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"/>
+                                <line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                            Add Another Sample
+                        </button>
+                    </div>
+                    <div class="card-content">
+                        <div class="table-container">
+                            <table class="results-table" id="batchSampleTable">
+                                <thead>
+                                    <tr>
+                                        <th>Filename</th>
+                                        <th>Batch Label</th>
+                                        <th>Status</th>
+                                        <th>Cells</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="batchSampleTableBody">
+                                    <tr>
+                                        <td colspan="5" style="text-align:center; color:var(--text-500);">
+                                            Upload samples to get started
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="action-bar" style="margin-top: var(--space-4);">
+                            <button class="btn btn-primary" id="batchMergeBtn" disabled>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M5 12h14M12 5l7 7-7 7"/>
+                                </svg>
+                                Merge Samples
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Merge Results -->
+                <div class="card" id="mergeResultsCard" hidden style="margin-top: var(--space-4);">
+                    <div class="card-header">
+                        <h3>Merge Results</h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="stat-grid stat-grid-4" id="mergeStatsGrid">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Integration Panel -->
+                <div class="card" id="integrationPanel" hidden style="margin-top: var(--space-4);">
+                    <div class="card-header">
+                        <h3>Batch Integration</h3>
+                    </div>
+                    <div class="card-content">
+                        <!-- Method Selector -->
+                        <div class="integration-methods">
+                            <label class="integration-method-card active" id="methodScanorama">
+                                <input type="radio" name="integrationMethod" value="scanorama" checked>
+                                <div class="method-card-content">
+                                    <div class="method-card-title">Scanorama</div>
+                                    <div class="method-card-desc">Fast mutual nearest neighbors approach. Works well for most datasets.</div>
+                                </div>
+                                <span class="method-availability-badge" id="scanoramaBadge">Checking...</span>
+                            </label>
+                            <label class="integration-method-card" id="methodScvi">
+                                <input type="radio" name="integrationMethod" value="scvi">
+                                <div class="method-card-content">
+                                    <div class="method-card-title">scVI</div>
+                                    <div class="method-card-desc">Deep generative model. Best for complex batch effects. Slower.</div>
+                                </div>
+                                <span class="method-availability-badge" id="scviBadge">Checking...</span>
+                            </label>
+                        </div>
+
+                        <!-- scVI Parameters -->
+                        <div class="scvi-params" id="scviParams" hidden>
+                            <div class="form-row" style="margin-top: var(--space-4);">
+                                <div class="form-group">
+                                    <label>Latent Dimensions</label>
+                                    <input type="number" class="text-input" id="scviNLatent" value="30" min="5" max="100">
+                                </div>
+                                <div class="form-group">
+                                    <label>Max Epochs</label>
+                                    <input type="number" class="text-input" id="scviMaxEpochs" value="400" min="50" max="2000">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Integration Progress -->
+                        <div class="integration-progress" id="integrationProgress" hidden style="margin-top: var(--space-4);">
+                            <div class="progress-bar" style="height: 8px;">
+                                <div class="progress-fill" id="integrationProgressFill" style="width:0%"></div>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; margin-top:var(--space-2);">
+                                <span class="progress-text" id="integrationProgressText">Starting...</span>
+                                <span class="progress-text" id="integrationProgressPct">0%</span>
+                            </div>
+                        </div>
+
+                        <!-- Integration Results -->
+                        <div id="integrationResults" hidden style="margin-top: var(--space-4);">
+                            <div class="detected-banner">
+                                <span class="detected-icon">&#10003;</span>
+                                <span class="detected-text" id="integrationResultText">Integration complete</span>
+                            </div>
+                        </div>
+
+                        <div class="action-bar" style="margin-top: var(--space-4);">
+                            <button class="btn btn-primary" id="runIntegrationBtn" disabled>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polygon points="5,3 19,12 5,21"/>
+                                </svg>
+                                Run Integration
+                            </button>
+                            <button class="btn btn-secondary" id="skipIntegrationBtn" hidden>
+                                Skip to Annotation
+                            </button>
                         </div>
                     </div>
                 </div>

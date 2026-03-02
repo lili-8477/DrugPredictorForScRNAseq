@@ -104,11 +104,23 @@ def detect_existing_results(adata):
     # Detect UMAP
     has_umap = 'X_umap' in adata.obsm
 
+    # Detect batch integration
+    has_batch_integration = 'X_scVI' in adata.obsm or 'X_scanorama' in adata.obsm
+    batch_method = None
+    if 'X_scVI' in adata.obsm:
+        batch_method = 'scvi'
+    elif 'X_scanorama' in adata.obsm:
+        batch_method = 'scanorama'
+    has_batch_column = 'batch' in obs_cols
+
     return {
         'has_doublet_scores': has_doublet_scores,
         'has_cell_type_annotations': has_cell_type_annotations,
         'annotation_columns': annotation_columns,
-        'has_umap': has_umap
+        'has_umap': has_umap,
+        'has_batch_integration': has_batch_integration,
+        'batch_integration_method': batch_method,
+        'has_batch_column': has_batch_column,
     }
 
 

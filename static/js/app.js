@@ -22,7 +22,17 @@ const state = {
     annotationResults: null,
     doubletsFiltered: false,
     umapData: null,
-    annotationColumnsData: []
+    annotationColumnsData: [],
+    // Multi-batch state
+    isBatchMode: false,
+    projectId: null,
+    samples: [],        // [{file_id, batch_label, filename, status, n_cells}]
+    mergedFileId: null,
+    integrationMethod: null,
+    integrationStatus: null,
+    integrationPollTimer: null,
+    scanoramaAvailable: false,
+    scviAvailable: false,
 };
 
 // ==================== DOM Elements ====================
@@ -536,7 +546,70 @@ const api = {
         await fetch(`${this.baseUrl}/api/cleanup/${fileId}`, {
             method: 'DELETE'
         });
-    }
+    },
+
+    // Multi-batch API methods
+    async createProject() {
+        const response = await fetch(`${this.baseUrl}/api/project/create`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        if (!response.ok) { const e = await response.json(); throw new Error(e.error || 'Failed to create project'); }
+        return response.json();
+    },
+
+    async getProject(projectId) {
+        const response = await fetch(`${this.baseUrl}/api/project/${projectId}`);
+        if (!response.ok) { const e = await response.json(); throw new Error(e.error || 'Failed to get project'); }
+        return response.json();
+    },
+
+    async addSampleToProject(projectId, fileId, batchLabel) {
+        const response = await fetch(`${this.baseUrl}/api/project/${projectId}/add-sample`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_id: fileId, batch_label: batchLabel })
+        });
+        if (!response.ok) { const e = await response.json(); throw new Error(e.error || 'Failed to add sample'); }
+        return response.json();
+    },
+
+    async removeSampleFromProject(projectId, fileId) {
+        const response = await fetch(`${this.baseUrl}/api/project/${projectId}/remove-sample`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_id: fileId })
+        });
+        if (!response.ok) { const e = await response.json(); throw new Error(e.error || 'Failed to remove sample'); }
+        return response.json();
+    },
+
+    async mergeProjectSamples(projectId) {
+        const response = await fetch(`${this.baseUrl}/api/project/${projectId}/merge`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        if (!response.ok) { const e = await response.json(); throw new Error(e.error || 'Merge failed'); }
+        return response.json();
+    },
+
+    async runIntegration(projectId, method, nLatent, maxEpochs) {
+        const response = await fetch(`${this.baseUrl}/api/project/${projectId}/integrate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ method, n_latent: nLatent, max_epochs: maxEpochs })
+        });
+        if (!response.ok) { const e = await response.json(); throw new Error(e.error || 'Integration failed'); }
+        return response.json();
+    },
+
+    async getIntegrationStatus(projectId) {
+        const response = await fetch(`${this.baseUrl}/api/project/${projectId}/status`);
+        if (!response.ok) { const e = await response.json(); throw new Error(e.error || 'Failed to get status'); }
+        return response.json();
+    },
 };
 
 // ==================== UI Functions ====================
@@ -717,6 +790,18 @@ async function handleUpload10x() {
         state.filename = result.filename;
         state.uploadSource = '10x';
 
+        // In batch mode, add to project and return
+        if (state.isBatchMode) {
+            elements.progressFill10x.style.width = '100%';
+            elements.progressText10x.textContent = 'Added to batch project!';
+            await addSampleToProject(result.file_id, result.filename);
+            setTimeout(() => {
+                elements.uploadProgress10x.hidden = true;
+                document.getElementById('batchManagerSection').scrollIntoView({ behavior: 'smooth' });
+            }, 500);
+            return;
+        }
+
         elements.progressFill10x.style.width = '70%';
         elements.progressText10x.textContent = 'Computing QC metrics...';
 
@@ -756,6 +841,18 @@ async function handleUploadH5(file) {
         state.fileId = result.file_id;
         state.filename = result.filename;
         state.uploadSource = '10x';
+
+        // In batch mode, add to project and return
+        if (state.isBatchMode) {
+            elements.progressFillH5.style.width = '100%';
+            elements.progressTextH5.textContent = 'Added to batch project!';
+            await addSampleToProject(result.file_id, result.filename);
+            setTimeout(() => {
+                elements.uploadProgressH5.hidden = true;
+                document.getElementById('batchManagerSection').scrollIntoView({ behavior: 'smooth' });
+            }, 500);
+            return;
+        }
 
         elements.progressFillH5.style.width = '70%';
         elements.progressTextH5.textContent = 'Computing QC metrics...';
@@ -1063,6 +1160,18 @@ async function handleFileUpload(file) {
         state.fileId = result.file_id;
         state.filename = result.filename;
         state.uploadSource = 'h5ad';
+
+        // In batch mode, add to project and return
+        if (state.isBatchMode) {
+            elements.progressFill.style.width = '100%';
+            elements.progressText.textContent = 'Added to batch project!';
+            await addSampleToProject(result.file_id, result.filename);
+            setTimeout(() => {
+                elements.uploadProgress.hidden = true;
+                document.getElementById('batchManagerSection').scrollIntoView({ behavior: 'smooth' });
+            }, 500);
+            return;
+        }
 
         elements.progressFill.style.width = '60%';
         elements.progressText.textContent = 'Extracting metadata...';
@@ -2052,6 +2161,27 @@ function resetApplication() {
     state.doubletsFiltered = false;
     state.umapData = null;
 
+    // Reset batch state
+    if (state.integrationPollTimer) {
+        clearInterval(state.integrationPollTimer);
+        state.integrationPollTimer = null;
+    }
+    state.isBatchMode = false;
+    state.projectId = null;
+    state.samples = [];
+    state.mergedFileId = null;
+    state.integrationMethod = null;
+    state.integrationStatus = null;
+
+    // Reset batch UI
+    document.getElementById('modeSingle').classList.add('active');
+    document.getElementById('modeBatch').classList.remove('active');
+    document.getElementById('batchManagerSection').hidden = true;
+    document.getElementById('mergeResultsCard').hidden = true;
+    document.getElementById('integrationPanel').hidden = true;
+    document.getElementById('integrationProgress').hidden = true;
+    document.getElementById('integrationResults').hidden = true;
+
     // Reset UI - hide all sections except upload
     elements.uploadProgress.hidden = true;
     elements.progressFill.style.width = '0%';
@@ -2111,6 +2241,326 @@ function resetApplication() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
+// ==================== Multi-Batch Functions ====================
+
+function handleModeSwitch(mode) {
+    state.isBatchMode = (mode === 'batch');
+    document.getElementById('modeSingle').classList.toggle('active', mode === 'single');
+    document.getElementById('modeBatch').classList.toggle('active', mode === 'batch');
+
+    const batchSection = document.getElementById('batchManagerSection');
+    if (state.isBatchMode) {
+        batchSection.hidden = false;
+        // Create project if needed
+        if (!state.projectId) {
+            createBatchProject();
+        }
+    } else {
+        batchSection.hidden = true;
+    }
+}
+
+async function createBatchProject() {
+    try {
+        const result = await api.createProject();
+        state.projectId = result.project_id;
+    } catch (err) {
+        showError('Failed to create project: ' + err.message);
+    }
+}
+
+async function addSampleToProject(fileId, filename) {
+    if (!state.projectId) return;
+
+    // Auto-generate batch label from filename
+    const batchLabel = filename.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    // Check for label uniqueness
+    let label = batchLabel;
+    let counter = 1;
+    while (state.samples.some(s => s.batch_label === label)) {
+        label = `${batchLabel}_${counter++}`;
+    }
+
+    try {
+        await api.addSampleToProject(state.projectId, fileId, label);
+        state.samples.push({
+            file_id: fileId,
+            batch_label: label,
+            filename: filename,
+            status: 'uploaded',
+            n_cells: null,
+        });
+        renderBatchSampleTable();
+        updateBatchMergeButton();
+    } catch (err) {
+        showError('Failed to add sample: ' + err.message);
+    }
+}
+
+async function removeSample(fileId) {
+    if (!state.projectId) return;
+    try {
+        await api.removeSampleFromProject(state.projectId, fileId);
+        state.samples = state.samples.filter(s => s.file_id !== fileId);
+        renderBatchSampleTable();
+        updateBatchMergeButton();
+    } catch (err) {
+        showError('Failed to remove sample: ' + err.message);
+    }
+}
+
+async function runSampleQcAndPreprocess(fileId) {
+    const sample = state.samples.find(s => s.file_id === fileId);
+    if (!sample) return;
+
+    const row = document.querySelector(`[data-sample-file-id="${fileId}"]`);
+    const statusCell = row ? row.querySelector('.batch-status-badge') : null;
+    if (statusCell) { statusCell.textContent = 'Running QC...'; statusCell.className = 'batch-status-badge badge badge-warning'; }
+
+    try {
+        // QC metrics
+        await api.computeQcMetrics(fileId);
+        if (statusCell) { statusCell.textContent = 'Filtering...'; }
+
+        // Apply default QC filters
+        const filterResult = await api.applyQcFilter({
+            file_id: fileId,
+            min_genes: 250,
+            min_counts: 500,
+            max_pct_mt: 20.0,
+            max_pct_ribo: 50.0,
+            min_cells_per_gene: 3
+        });
+
+        if (statusCell) { statusCell.textContent = 'Preprocessing...'; }
+
+        // Preprocess
+        await api.runPreprocess(fileId);
+
+        sample.status = 'preprocessed';
+        sample.n_cells = filterResult.summary.n_cells_after;
+        renderBatchSampleTable();
+        updateBatchMergeButton();
+    } catch (err) {
+        sample.status = 'error';
+        renderBatchSampleTable();
+        showError(`QC failed for ${sample.filename}: ${err.message}`);
+    }
+}
+
+function renderBatchSampleTable() {
+    const tbody = document.getElementById('batchSampleTableBody');
+    if (state.samples.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-500);">Upload samples to get started</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = state.samples.map(s => {
+        const statusClass = s.status === 'preprocessed' ? 'badge-success' :
+                           s.status === 'error' ? 'badge-error' : 'badge-info';
+        const statusText = s.status === 'preprocessed' ? 'Ready' :
+                          s.status === 'error' ? 'Error' :
+                          s.status === 'uploaded' ? 'Needs QC' : s.status;
+        const cellCount = s.n_cells ? s.n_cells.toLocaleString() : '-';
+        const canRunQc = s.status === 'uploaded';
+
+        return `<tr data-sample-file-id="${s.file_id}">
+            <td class="compound-cell">${s.filename}</td>
+            <td>
+                <input type="text" class="text-input batch-label-input" value="${s.batch_label}"
+                    data-file-id="${s.file_id}" style="width:140px;"
+                    onchange="handleBatchLabelChange(this)" ${s.status === 'preprocessed' ? 'disabled' : ''}>
+            </td>
+            <td><span class="batch-status-badge badge ${statusClass}">${statusText}</span></td>
+            <td>${cellCount}</td>
+            <td>
+                ${canRunQc ? `<button class="btn btn-secondary" style="padding:var(--space-2) var(--space-3); font-size:0.8125rem;"
+                    onclick="runSampleQcAndPreprocess('${s.file_id}')">Run QC & Preprocess</button>` : ''}
+                <button class="btn btn-icon" onclick="removeSample('${s.file_id}')" title="Remove sample"
+                    style="color:var(--error-500);">&times;</button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function handleBatchLabelChange(input) {
+    const fileId = input.dataset.fileId;
+    const sample = state.samples.find(s => s.file_id === fileId);
+    if (sample) {
+        sample.batch_label = input.value.trim() || sample.batch_label;
+    }
+}
+
+function updateBatchMergeButton() {
+    const mergeBtn = document.getElementById('batchMergeBtn');
+    const allPreprocessed = state.samples.length >= 2 && state.samples.every(s => s.status === 'preprocessed');
+    mergeBtn.disabled = !allPreprocessed;
+}
+
+async function handleMergeSamples() {
+    if (!state.projectId) return;
+
+    const mergeBtn = document.getElementById('batchMergeBtn');
+    mergeBtn.disabled = true;
+    mergeBtn.innerHTML = '<span class="loading-spinner" style="width:16px;height:16px;border-width:2px;margin:0;"></span> Merging...';
+
+    try {
+        const result = await api.mergeProjectSamples(state.projectId);
+        state.mergedFileId = result.merged_file_id;
+
+        // Show merge results
+        const mergeCard = document.getElementById('mergeResultsCard');
+        mergeCard.hidden = false;
+        const statsGrid = document.getElementById('mergeStatsGrid');
+        const summary = result.summary;
+        statsGrid.innerHTML = `
+            <div class="stat-item">
+                <span class="stat-value">${summary.total_cells.toLocaleString()}</span>
+                <span class="stat-label">Total Cells</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value">${summary.n_samples}</span>
+                <span class="stat-label">Samples</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value">${summary.gene_intersection.toLocaleString()}</span>
+                <span class="stat-label">Shared Genes</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value">${summary.gene_union.toLocaleString()}</span>
+                <span class="stat-label">Total Genes (Union)</span>
+            </div>
+        `;
+
+        // Show integration panel
+        const integrationPanel = document.getElementById('integrationPanel');
+        integrationPanel.hidden = false;
+        document.getElementById('runIntegrationBtn').disabled = false;
+        document.getElementById('skipIntegrationBtn').hidden = false;
+
+        mergeBtn.innerHTML = 'Merge Complete';
+
+    } catch (err) {
+        showError('Merge failed: ' + err.message);
+        mergeBtn.disabled = false;
+        mergeBtn.textContent = 'Merge Samples';
+    }
+}
+
+function handleIntegrationMethodChange() {
+    const method = document.querySelector('input[name="integrationMethod"]:checked').value;
+    document.getElementById('scviParams').hidden = (method !== 'scvi');
+
+    // Update card active states
+    document.getElementById('methodScanorama').classList.toggle('active', method === 'scanorama');
+    document.getElementById('methodScvi').classList.toggle('active', method === 'scvi');
+}
+
+async function handleRunIntegration() {
+    if (!state.projectId) return;
+
+    const method = document.querySelector('input[name="integrationMethod"]:checked').value;
+    const nLatent = parseInt(document.getElementById('scviNLatent').value) || 30;
+    const maxEpochs = parseInt(document.getElementById('scviMaxEpochs').value) || 400;
+
+    const runBtn = document.getElementById('runIntegrationBtn');
+    runBtn.disabled = true;
+
+    const progressDiv = document.getElementById('integrationProgress');
+    progressDiv.hidden = false;
+
+    try {
+        await api.runIntegration(state.projectId, method, nLatent, maxEpochs);
+        state.integrationMethod = method;
+
+        // Start polling
+        state.integrationPollTimer = setInterval(async () => {
+            try {
+                const status = await api.getIntegrationStatus(state.projectId);
+
+                document.getElementById('integrationProgressFill').style.width = status.progress + '%';
+                document.getElementById('integrationProgressText').textContent = status.message;
+                document.getElementById('integrationProgressPct').textContent = status.progress + '%';
+
+                if (status.status === 'completed') {
+                    clearInterval(state.integrationPollTimer);
+                    state.integrationPollTimer = null;
+                    state.integrationStatus = 'completed';
+
+                    progressDiv.hidden = true;
+                    const resultsDiv = document.getElementById('integrationResults');
+                    resultsDiv.hidden = false;
+                    document.getElementById('integrationResultText').textContent =
+                        `${method === 'scvi' ? 'scVI' : 'Scanorama'} integration complete. Embedding stored in ${status.result.embedding_key} (dim=${status.result.embedding_dim}).`;
+
+                    // Set merged file as active for downstream
+                    state.fileId = state.mergedFileId;
+                    proceedAfterIntegration();
+                } else if (status.status === 'error') {
+                    clearInterval(state.integrationPollTimer);
+                    state.integrationPollTimer = null;
+                    showError('Integration failed: ' + (status.error || 'Unknown error'));
+                    runBtn.disabled = false;
+                }
+            } catch (pollErr) {
+                // Polling error - keep trying
+            }
+        }, 2000);
+
+    } catch (err) {
+        showError('Failed to start integration: ' + err.message);
+        runBtn.disabled = false;
+        progressDiv.hidden = true;
+    }
+}
+
+function handleSkipIntegration() {
+    // Use merged file without integration
+    state.fileId = state.mergedFileId;
+    proceedAfterIntegration();
+}
+
+function proceedAfterIntegration() {
+    // In batch mode, after integration (or skip), jump to annotation
+    // Use the proper function that also loads custom models and annotation columns
+    showAnnotationSection();
+}
+
+function updateIntegrationAvailability(statusData) {
+    state.scanoramaAvailable = statusData.scanorama && statusData.scanorama.available;
+    state.scviAvailable = statusData.scvi && statusData.scvi.available;
+
+    const scanoramaBadge = document.getElementById('scanoramaBadge');
+    const scviBadge = document.getElementById('scviBadge');
+
+    if (scanoramaBadge) {
+        scanoramaBadge.textContent = state.scanoramaAvailable ? 'Available' : 'Not installed';
+        scanoramaBadge.className = 'method-availability-badge ' + (state.scanoramaAvailable ? 'available' : 'unavailable');
+    }
+    if (scviBadge) {
+        scviBadge.textContent = state.scviAvailable ? 'Available' : 'Not installed';
+        scviBadge.className = 'method-availability-badge ' + (state.scviAvailable ? 'available' : 'unavailable');
+    }
+
+    // Disable unavailable methods
+    const scviRadio = document.querySelector('input[name="integrationMethod"][value="scvi"]');
+    if (scviRadio && !state.scviAvailable) {
+        scviRadio.disabled = true;
+        document.getElementById('methodScvi').classList.add('disabled');
+    }
+    const scanoramaRadio = document.querySelector('input[name="integrationMethod"][value="scanorama"]');
+    if (scanoramaRadio && !state.scanoramaAvailable) {
+        scanoramaRadio.disabled = true;
+        document.getElementById('methodScanorama').classList.add('disabled');
+        // If scanorama not available but scvi is, select scvi
+        if (state.scviAvailable && scviRadio) {
+            scviRadio.checked = true;
+            handleIntegrationMethodChange();
+        }
+    }
+}
+
 // ==================== Initialization ====================
 async function init() {
     // Check system status
@@ -2125,6 +2575,8 @@ async function init() {
             if (!status.checkpoints.available) message += 'Model checkpoints missing.';
             updateHeaderStatus('error', message.trim());
         }
+        // Update batch integration availability
+        updateIntegrationAvailability(status);
     } catch (error) {
         updateHeaderStatus('error', 'Cannot connect to server');
     }
@@ -2242,6 +2694,24 @@ async function init() {
     // Toast close
     elements.closeToast.addEventListener('click', () => {
         elements.errorToast.hidden = true;
+    });
+
+    // Multi-batch mode toggle
+    document.getElementById('modeSingle').addEventListener('click', () => handleModeSwitch('single'));
+    document.getElementById('modeBatch').addEventListener('click', () => handleModeSwitch('batch'));
+
+    // Batch manager buttons
+    document.getElementById('batchAddSampleBtn').addEventListener('click', () => {
+        // Scroll to upload section for adding another sample
+        elements.uploadSection.scrollIntoView({ behavior: 'smooth' });
+    });
+    document.getElementById('batchMergeBtn').addEventListener('click', handleMergeSamples);
+    document.getElementById('runIntegrationBtn').addEventListener('click', handleRunIntegration);
+    document.getElementById('skipIntegrationBtn').addEventListener('click', handleSkipIntegration);
+
+    // Integration method change
+    document.querySelectorAll('input[name="integrationMethod"]').forEach(radio => {
+        radio.addEventListener('change', handleIntegrationMethodChange);
     });
 }
 
