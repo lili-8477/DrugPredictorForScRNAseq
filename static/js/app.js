@@ -45,12 +45,6 @@ const elements = {
     progressTextH5: document.getElementById('progressTextH5'),
     uploadZone10x: document.getElementById('uploadZone10x'),
     fileInput10x: document.getElementById('fileInput10x'),
-    tenxFileList: document.getElementById('tenxFileList'),
-    tenxBarcodes: document.getElementById('tenxBarcodes'),
-    tenxFeatures: document.getElementById('tenxFeatures'),
-    tenxMatrix: document.getElementById('tenxMatrix'),
-    tenxUploadActions: document.getElementById('tenxUploadActions'),
-    upload10xBtn: document.getElementById('upload10xBtn'),
     uploadProgress10x: document.getElementById('uploadProgress10x'),
     progressFill10x: document.getElementById('progressFill10x'),
     progressText10x: document.getElementById('progressText10x'),
@@ -623,7 +617,9 @@ function handleTabSwitch(tab) {
 // ==================== 10x File Handling ====================
 function handle10xFileSelect(e) {
     const files = Array.from(e.target.files);
+    console.log('Directory selected, total files:', files.length, files.map(f => f.name));
     classify10xFiles(files);
+    e.target.value = '';
 }
 
 function handle10xDrop(e) {
@@ -631,8 +627,45 @@ function handle10xDrop(e) {
     e.stopPropagation();
     elements.uploadZone10x.classList.remove('drag-over');
 
-    const files = Array.from(e.dataTransfer.files);
-    classify10xFiles(files);
+    // Support dropped directories via dataTransfer items
+    const items = e.dataTransfer.items;
+    if (items) {
+        const filePromises = [];
+        for (const item of items) {
+            const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
+            if (entry && entry.isDirectory) {
+                filePromises.push(readDirectoryEntries(entry));
+            } else if (item.kind === 'file') {
+                filePromises.push(Promise.resolve([item.getAsFile()]));
+            }
+        }
+        Promise.all(filePromises).then(results => {
+            classify10xFiles(results.flat());
+        });
+    } else {
+        classify10xFiles(Array.from(e.dataTransfer.files));
+    }
+}
+
+function readDirectoryEntries(dirEntry) {
+    return new Promise((resolve) => {
+        const reader = dirEntry.createReader();
+        reader.readEntries((entries) => {
+            const files = [];
+            let pending = entries.length;
+            if (pending === 0) resolve(files);
+            entries.forEach(entry => {
+                if (entry.isFile) {
+                    entry.file(f => {
+                        files.push(f);
+                        if (--pending === 0) resolve(files);
+                    });
+                } else {
+                    if (--pending === 0) resolve(files);
+                }
+            });
+        });
+    });
 }
 
 function classify10xFiles(files) {
@@ -640,39 +673,26 @@ function classify10xFiles(files) {
 
     files.forEach(f => {
         const name = f.name.toLowerCase();
-        if (name.includes('barcodes') && name.endsWith('.tsv.gz')) {
+        if (name.includes('barcodes')) {
             state.tenxFiles.barcodes = f;
-        } else if (name.includes('features') && name.endsWith('.tsv.gz')) {
+        } else if (name.includes('features') || name.includes('genes')) {
             state.tenxFiles.features = f;
-        } else if (name.includes('genes') && name.endsWith('.tsv.gz')) {
-            // genes.tsv.gz is an older format for features
-            state.tenxFiles.features = f;
-        } else if (name.includes('matrix') && name.endsWith('.mtx.gz')) {
+        } else if (name.includes('matrix')) {
             state.tenxFiles.matrix = f;
         }
     });
 
-    // Update file list display
-    elements.tenxFileList.hidden = false;
-    elements.tenxUploadActions.hidden = false;
+    const { barcodes, features, matrix } = state.tenxFiles;
 
-    const updateIcon = (el, file) => {
-        const icon = el.querySelector('.tenx-file-icon');
-        if (file) {
-            icon.textContent = '\u2713';
-            icon.className = 'tenx-file-icon ready';
-        } else {
-            icon.textContent = '?';
-            icon.className = 'tenx-file-icon pending';
-        }
-    };
-
-    updateIcon(elements.tenxBarcodes, state.tenxFiles.barcodes);
-    updateIcon(elements.tenxFeatures, state.tenxFiles.features);
-    updateIcon(elements.tenxMatrix, state.tenxFiles.matrix);
-
-    const allReady = state.tenxFiles.barcodes && state.tenxFiles.features && state.tenxFiles.matrix;
-    elements.upload10xBtn.disabled = !allReady;
+    if (barcodes && features && matrix) {
+        handleUpload10x();
+    } else {
+        const missing = [];
+        if (!barcodes) missing.push('barcodes.tsv.gz');
+        if (!features) missing.push('features.tsv.gz (or genes.tsv.gz)');
+        if (!matrix) missing.push('matrix.mtx.gz');
+        showError(`Invalid Cell Ranger directory. Missing required files: ${missing.join(', ')}`);
+    }
 }
 
 async function handleUpload10x() {
@@ -2039,9 +2059,6 @@ function resetApplication() {
     elements.progressFill10x.style.width = '0%';
     elements.uploadProgressH5.hidden = true;
     elements.progressFillH5.style.width = '0%';
-    elements.tenxFileList.hidden = true;
-    elements.tenxUploadActions.hidden = true;
-    elements.upload10xBtn.disabled = true;
     elements.qcVisualizationSection.hidden = true;
     elements.filterResultsSection.hidden = true;
     elements.preprocessSection.hidden = true;
@@ -2128,7 +2145,6 @@ async function init() {
     elements.uploadZone10x.addEventListener('dragleave', (e) => { e.preventDefault(); e.stopPropagation(); elements.uploadZone10x.classList.remove('drag-over'); });
     elements.uploadZone10x.addEventListener('drop', handle10xDrop);
     elements.fileInput10x.addEventListener('change', handle10xFileSelect);
-    elements.upload10xBtn.addEventListener('click', handleUpload10x);
 
     // H5 upload zone
     elements.uploadZoneH5.addEventListener('click', () => elements.fileInputH5.click());

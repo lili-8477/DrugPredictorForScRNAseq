@@ -85,6 +85,7 @@
                 </div>
 
                 <!-- Cell Ranger Upload -->
+                <input type="file" id="fileInput10x" webkitdirectory hidden>
                 <div class="upload-panel" id="panel10x">
                     <div class="upload-zone upload-zone-10x" id="uploadZone10x">
                         <div class="upload-content">
@@ -93,24 +94,8 @@
                                     <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
                                 </svg>
                             </div>
-                            <p class="upload-text">Upload Cell Ranger files</p>
-                            <p class="upload-subtext">Select all 3 files: barcodes.tsv.gz, features.tsv.gz, matrix.mtx.gz</p>
-                            <input type="file" id="fileInput10x" accept=".gz" multiple hidden>
-                        </div>
-                        <div class="tenx-file-list" id="tenxFileList" hidden>
-                            <div class="tenx-file-item" id="tenxBarcodes"><span class="tenx-file-icon pending">?</span> barcodes.tsv.gz</div>
-                            <div class="tenx-file-item" id="tenxFeatures"><span class="tenx-file-icon pending">?</span> features.tsv.gz</div>
-                            <div class="tenx-file-item" id="tenxMatrix"><span class="tenx-file-icon pending">?</span> matrix.mtx.gz</div>
-                        </div>
-                        <div class="action-bar action-bar-left" id="tenxUploadActions" hidden style="margin-top: var(--space-4);">
-                            <button class="btn btn-primary" id="upload10xBtn" disabled>
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                                    <polyline points="17,8 12,3 7,8"/>
-                                    <line x1="12" y1="3" x2="12" y2="15"/>
-                                </svg>
-                                Upload &amp; Load
-                            </button>
+                            <p class="upload-text">Upload Cell Ranger Directory</p>
+                            <p class="upload-subtext">Select the filtered_feature_bc_matrix folder</p>
                         </div>
                     </div>
                     <div class="upload-progress" id="uploadProgress10x" hidden>
