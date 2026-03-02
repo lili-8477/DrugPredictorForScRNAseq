@@ -963,6 +963,25 @@
                         <p style="color: var(--text-400); font-size: 0.9375rem; margin-bottom: var(--space-4);">
                             Compute a UMAP embedding to visualize cell clusters and validate annotations.
                         </p>
+
+                        <!-- UMAP Parameters -->
+                        <div class="umap-params-grid">
+                            <div class="form-group">
+                                <label for="umapNNeighbors">Neighbors</label>
+                                <div class="input-with-hint">
+                                    <input type="number" class="text-input" id="umapNNeighbors" value="15" min="5" max="100" step="1">
+                                    <span class="input-hint">Controls local vs global structure (5-100)</span>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="umapResolution">Clustering Resolution</label>
+                                <div class="input-with-hint">
+                                    <input type="number" class="text-input" id="umapResolution" value="1.0" min="0.1" max="5.0" step="0.1">
+                                    <span class="input-hint">Higher = more clusters (0.1-5.0)</span>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="action-bar action-bar-left">
                             <button class="btn btn-primary" id="runUmapBtn">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -1005,6 +1024,22 @@
                                         placeholder="Search gene..." autocomplete="off">
                                     <div class="gene-autocomplete" id="geneAutocomplete" hidden></div>
                                 </div>
+                            </div>
+
+                            <!-- Re-cluster controls -->
+                            <div class="recluster-controls">
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="reclusterResolution">Resolution</label>
+                                    <input type="number" class="text-input" id="reclusterResolution" value="1.0" min="0.1" max="5.0" step="0.1" style="width:80px;">
+                                </div>
+                                <button class="btn btn-secondary" id="reclusterBtn" style="padding:var(--space-2) var(--space-4); font-size:0.875rem;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <polyline points="23 4 23 10 17 10"/>
+                                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                                    </svg>
+                                    Re-cluster
+                                </button>
+                                <span class="recluster-info" id="reclusterInfo" style="font-size:0.8125rem; color:var(--text-400);"></span>
                             </div>
 
                             <div class="umap-plot-container">

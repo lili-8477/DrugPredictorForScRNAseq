@@ -431,13 +431,15 @@ const api = {
         return response.json();
     },
 
-    async computeUmap(fileId, forceRecompute = false) {
+    async computeUmap(fileId, forceRecompute = false, nNeighbors = 15, resolution = 1.0) {
         const response = await fetch(`${this.baseUrl}/api/umap`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 file_id: fileId,
-                force_recompute: forceRecompute
+                force_recompute: forceRecompute,
+                n_neighbors: nNeighbors,
+                resolution: resolution
             })
         });
 
@@ -451,6 +453,19 @@ const api = {
             }
         }
 
+        return response.json();
+    },
+
+    async recluster(fileId, resolution) {
+        const response = await fetch(`${this.baseUrl}/api/recluster`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_id: fileId, resolution })
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Re-clustering failed');
+        }
         return response.json();
     },
 
@@ -1631,17 +1646,47 @@ async function autoLoadExistingUmap() {
 }
 
 async function handleComputeUmap() {
-    showLoading('Computing UMAP', 'Running dimensionality reduction...\nThis may take a minute for large datasets.');
+    const nNeighbors = parseInt(document.getElementById('umapNNeighbors').value) || 15;
+    const resolution = parseFloat(document.getElementById('umapResolution').value) || 1.0;
+
+    showLoading('Computing UMAP', 'Running dimensionality reduction and clustering...\nThis may take a minute for large datasets.');
 
     try {
-        const result = await api.computeUmap(state.fileId);
+        const result = await api.computeUmap(state.fileId, true, nNeighbors, resolution);
         state.umapData = result.results;
 
         hideLoading();
         displayUmapResults(state.umapData);
+
+        // Sync recluster resolution input
+        document.getElementById('reclusterResolution').value = resolution;
     } catch (error) {
         hideLoading();
         showError(error.message);
+    }
+}
+
+async function handleRecluster() {
+    const resolution = parseFloat(document.getElementById('reclusterResolution').value) || 1.0;
+    const reclusterBtn = document.getElementById('reclusterBtn');
+    const reclusterInfo = document.getElementById('reclusterInfo');
+
+    reclusterBtn.disabled = true;
+    reclusterInfo.textContent = 'Re-clustering...';
+
+    try {
+        const result = await api.recluster(state.fileId, resolution);
+        state.umapData = result.results;
+        displayUmapResults(state.umapData);
+
+        reclusterInfo.textContent = `${result.results.n_clusters} clusters at resolution ${resolution}`;
+        // Sync the initial resolution input
+        document.getElementById('umapResolution').value = resolution;
+    } catch (error) {
+        showError(error.message);
+        reclusterInfo.textContent = '';
+    } finally {
+        reclusterBtn.disabled = false;
     }
 }
 
@@ -2664,6 +2709,7 @@ async function init() {
     elements.skipUmapBtn.addEventListener('click', handleSkipUmap);
     elements.umapColorBy.addEventListener('change', handleUmapColorChange);
     elements.continueFromUmapBtn.addEventListener('click', handleContinueFromUmap);
+    document.getElementById('reclusterBtn').addEventListener('click', handleRecluster);
     elements.umapGeneInput.addEventListener('input', handleGeneInputChange);
     elements.umapGeneInput.addEventListener('keydown', handleGeneInputKeydown);
 

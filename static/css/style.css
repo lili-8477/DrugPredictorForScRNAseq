@@ -1846,3 +1846,36 @@ body {
     background: var(--gradient-primary);
     transition: width 0.5s ease;
 }
+
+/* ==================== UMAP Parameters ==================== */
+.umap-params-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-4);
+    margin-bottom: var(--space-5);
+    padding: var(--space-4);
+    background: var(--bg-800);
+    border-radius: var(--radius-lg);
+}
+
+@media (max-width: 640px) {
+    .umap-params-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.umap-params-grid .text-input {
+    width: 100px;
+}
+
+/* ==================== Re-cluster Controls ==================== */
+.recluster-controls {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-3);
+    margin-top: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-800);
+    border-radius: var(--radius-md);
+    flex-wrap: wrap;
+}

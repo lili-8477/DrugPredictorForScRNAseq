@@ -7,16 +7,20 @@ import scipy.sparse as sp
 from .metadata import is_log_normalized, get_categorical_info
 
 
-def compute_umap(adata, force_recompute=False):
+def compute_umap(adata, force_recompute=False, n_neighbors=15, resolution=1.0):
     """
     Compute UMAP embedding for visualization.
 
     Checks if X_umap already exists; skips computation if so (unless forced).
-    Handles normalization, HVG selection, PCA, neighbor graph, and UMAP.
+    Handles normalization, HVG selection, PCA, neighbor graph, UMAP, and
+    Leiden clustering at configurable resolution.
 
     Args:
         adata: AnnData object (modified in-place)
         force_recompute: If True, recompute even if X_umap exists
+        n_neighbors: Number of neighbors for the neighbor graph (default 15)
+        resolution: Leiden clustering resolution (default 1.0). Higher values
+                    produce more clusters.
 
     Returns:
         tuple: (result_dict, adata) - result dict with UMAP data, and
@@ -59,19 +63,23 @@ def compute_umap(adata, force_recompute=False):
 
         # Neighbors — use batch-corrected embeddings if available
         if 'X_scVI' in adata.obsm:
-            sc.pp.neighbors(adata, use_rep='X_scVI', n_neighbors=15)
-            steps_performed.append('Computed neighbor graph from scVI embedding (n_neighbors=15)')
+            sc.pp.neighbors(adata, use_rep='X_scVI', n_neighbors=n_neighbors)
+            steps_performed.append(f'Computed neighbor graph from scVI embedding (n_neighbors={n_neighbors})')
         elif 'X_scanorama' in adata.obsm:
-            sc.pp.neighbors(adata, use_rep='X_scanorama', n_neighbors=15)
-            steps_performed.append('Computed neighbor graph from Scanorama embedding (n_neighbors=15)')
+            sc.pp.neighbors(adata, use_rep='X_scanorama', n_neighbors=n_neighbors)
+            steps_performed.append(f'Computed neighbor graph from Scanorama embedding (n_neighbors={n_neighbors})')
         else:
             n_pcs = min(40, n_comps)
-            sc.pp.neighbors(adata, n_neighbors=15, n_pcs=n_pcs)
-            steps_performed.append('Computed neighbor graph (n_neighbors=15)')
+            sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs)
+            steps_performed.append(f'Computed neighbor graph (n_neighbors={n_neighbors})')
 
         # UMAP
         sc.tl.umap(adata)
         steps_performed.append('Computed UMAP embedding')
+
+    # Leiden clustering (always run if resolution provided, to allow re-clustering)
+    sc.tl.leiden(adata, resolution=resolution, flavor='igraph', n_iterations=2)
+    steps_performed.append(f'Leiden clustering (resolution={resolution})')
 
     # Extract coordinates
     coords = adata.obsm['X_umap']
@@ -97,7 +105,55 @@ def compute_umap(adata, force_recompute=False):
         'categorical_columns': categorical_columns,
         'labels': labels,
         'gene_names': gene_names,
-        'steps_performed': steps_performed
+        'steps_performed': steps_performed,
+        'resolution': resolution,
+    }
+
+    return result, adata
+
+
+def recluster(adata, resolution=1.0):
+    """Re-run Leiden clustering at a new resolution without recomputing UMAP.
+
+    Requires that a neighbor graph already exists in adata.
+
+    Args:
+        adata: AnnData object with existing neighbor graph and X_umap
+        resolution: Leiden clustering resolution
+
+    Returns:
+        tuple: (result_dict, adata)
+    """
+    if 'connectivities' not in adata.obsp:
+        raise ValueError("No neighbor graph found. Run full UMAP computation first.")
+
+    sc.tl.leiden(adata, resolution=resolution, flavor='igraph', n_iterations=2)
+
+    # Re-extract coordinates and labels
+    coords = adata.obsm['X_umap']
+    x = coords[:, 0].tolist()
+    y = coords[:, 1].tolist()
+
+    categorical_info = get_categorical_info(adata)
+    categorical_columns = list(categorical_info.keys())
+
+    labels = {}
+    for col in categorical_columns:
+        labels[col] = [str(v) for v in adata.obs[col].values]
+
+    n_clusters = len(adata.obs['leiden'].cat.categories)
+
+    result = {
+        'n_cells': int(adata.n_obs),
+        'n_genes': int(adata.n_vars),
+        'x': x,
+        'y': y,
+        'categorical_columns': categorical_columns,
+        'labels': labels,
+        'gene_names': list(adata.var_names),
+        'steps_performed': [f'Leiden re-clustering (resolution={resolution}, {n_clusters} clusters)'],
+        'resolution': resolution,
+        'n_clusters': n_clusters,
     }
 
     return result, adata

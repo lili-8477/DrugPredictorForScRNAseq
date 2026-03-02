@@ -738,6 +738,8 @@ def run_umap():
 
     filepath = file_store[file_id]['filepath']
     force_recompute = data.get('force_recompute', False)
+    n_neighbors = int(data.get('n_neighbors', 15))
+    resolution = float(data.get('resolution', 1.0))
 
     try:
         import anndata as ad
@@ -747,7 +749,10 @@ def run_umap():
         adata = ad.read_h5ad(filepath)
 
         # Compute UMAP (returns result dict and potentially modified adata)
-        results, adata = compute_umap(adata, force_recompute=force_recompute)
+        results, adata = compute_umap(
+            adata, force_recompute=force_recompute,
+            n_neighbors=n_neighbors, resolution=resolution
+        )
 
         # Save modified AnnData back (with UMAP coords in .obsm)
         adata.write_h5ad(filepath)
@@ -766,6 +771,38 @@ def run_umap():
     except Exception as e:
         return jsonify({
             'error': f'UMAP computation failed: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+@app.route('/api/recluster', methods=['POST'])
+def run_recluster():
+    """Re-run Leiden clustering at a new resolution without recomputing UMAP"""
+    data = request.get_json()
+    file_id = data.get('file_id')
+
+    if not file_id or file_id not in file_store:
+        return jsonify({'error': 'File not found'}), 404
+
+    filepath = file_store[file_id]['filepath']
+    resolution = float(data.get('resolution', 1.0))
+
+    try:
+        import anndata as ad
+        from utils.umap import recluster
+
+        adata = ad.read_h5ad(filepath)
+        results, adata = recluster(adata, resolution=resolution)
+        adata.write_h5ad(filepath)
+
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+
+    except Exception as e:
+        return jsonify({
+            'error': f'Re-clustering failed: {str(e)}',
             'traceback': traceback.format_exc()
         }), 500
 
