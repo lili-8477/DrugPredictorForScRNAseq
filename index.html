@@ -289,9 +289,10 @@
                             <div class="progress-bar" style="height: 8px;">
                                 <div class="progress-fill" id="integrationProgressFill" style="width:0%"></div>
                             </div>
-                            <div style="display:flex; justify-content:space-between; margin-top:var(--space-2);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:var(--space-2);">
                                 <span class="progress-text" id="integrationProgressText">Starting...</span>
                                 <span class="progress-text" id="integrationProgressPct">0%</span>
+                                <button class="btn btn-secondary btn-sm" id="cancelIntegrationBtn" style="margin-left:var(--space-3);">Cancel</button>
                             </div>
                         </div>
 
@@ -1246,6 +1247,7 @@
                     <div class="loading-spinner"></div>
                     <h3 id="loadingTitle">Processing...</h3>
                     <p id="loadingMessage">Running DrugReflector analysis</p>
+                    <button class="btn btn-secondary loading-cancel-btn" id="loadingCancelBtn" hidden>Cancel</button>
                 </div>
             </div>
 

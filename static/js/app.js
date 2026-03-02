@@ -33,6 +33,11 @@ const state = {
     integrationPollTimer: null,
     scanoramaAvailable: false,
     scviAvailable: false,
+    // Batch QC mode: tracks which sample is being QC'd interactively
+    batchQcSampleId: null,
+    // Cancellation
+    activeAbortController: null,
+    activeTaskId: null,
 };
 
 // ==================== DOM Elements ====================
@@ -625,6 +630,21 @@ const api = {
         if (!response.ok) { const e = await response.json(); throw new Error(e.error || 'Failed to get status'); }
         return response.json();
     },
+
+    async cancelIntegration(projectId) {
+        const response = await fetch(`${this.baseUrl}/api/project/${projectId}/cancel-integration`, {
+            method: 'POST',
+        });
+        if (!response.ok) { const e = await response.json(); throw new Error(e.error || 'Failed to cancel'); }
+        return response.json();
+    },
+
+    async cancelTask(taskId) {
+        const response = await fetch(`${this.baseUrl}/api/cancel-task/${taskId}`, {
+            method: 'POST',
+        });
+        return response.json();
+    },
 };
 
 // ==================== UI Functions ====================
@@ -638,14 +658,20 @@ function showError(message) {
     }, 5000);
 }
 
-function showLoading(title, message) {
+function showLoading(title, message, { cancellable = false } = {}) {
     elements.loadingTitle.textContent = title;
     elements.loadingMessage.textContent = message;
     elements.loadingOverlay.hidden = false;
+    const cancelBtn = document.getElementById('loadingCancelBtn');
+    cancelBtn.hidden = !cancellable;
 }
 
 function hideLoading() {
     elements.loadingOverlay.hidden = true;
+    document.getElementById('loadingCancelBtn').hidden = true;
+    // Clean up abort controller
+    state.activeAbortController = null;
+    state.activeTaskId = null;
 }
 
 function updateHeaderStatus(status, message) {
@@ -1078,12 +1104,72 @@ function showFilterResults(summary) {
     elements.filterGenesAfter.textContent = formatNumber(summary.n_genes_after);
     elements.filterGenesRemoved.textContent = `(-${formatNumber(summary.n_genes_removed)})`;
 
+    // In batch QC mode, change the continue button
+    if (state.batchQcSampleId) {
+        const continueBtn = document.getElementById('continueToDoubletBtn');
+        continueBtn.textContent = 'Preprocess & Return to Batch Manager';
+    }
+
     elements.filterResultsSection.hidden = false;
     elements.filterResultsSection.scrollIntoView({ behavior: 'smooth' });
 }
 
-function handleContinueToDoublet() {
+async function handleContinueToDoublet() {
+    if (state.batchQcSampleId) {
+        await handleBatchQcContinue();
+        return;
+    }
     showQcSection(state.metadata);
+}
+
+async function handleBatchQcContinue() {
+    const fileId = state.batchQcSampleId;
+    const sample = state.samples.find(s => s.file_id === fileId);
+    if (!sample) return;
+
+    showLoading('Preprocessing', `Preprocessing ${sample.filename}...`);
+
+    try {
+        await api.runPreprocess(fileId);
+
+        // Update metadata to get cell count after filtering + preprocessing
+        const metadata = await api.getMetadata(fileId);
+        sample.status = 'preprocessed';
+        sample.n_cells = metadata.shape.n_cells;
+
+        hideLoading();
+
+        // Clean up batch QC mode
+        finishBatchQc();
+    } catch (err) {
+        hideLoading();
+        sample.status = 'error';
+        finishBatchQc();
+        showError(`Preprocessing failed for ${sample.filename}: ${err.message}`);
+    }
+}
+
+function finishBatchQc() {
+    state.batchQcSampleId = null;
+    // Restore fileId to merged file (or null if not merged yet)
+    state.fileId = state.mergedFileId || null;
+
+    // Hide QC sections
+    elements.qcVisualizationSection.hidden = true;
+    elements.filterResultsSection.hidden = true;
+
+    // Hide batch QC banner
+    const banner = document.getElementById('batchQcBanner');
+    if (banner) banner.hidden = true;
+
+    // Restore button text
+    const continueBtn = document.getElementById('continueToDoubletBtn');
+    continueBtn.innerHTML = 'Continue to Doublet Detection <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12,5 19,12 12,19"/></svg>';
+
+    // Re-render batch table and scroll to it
+    renderBatchSampleTable();
+    updateBatchMergeButton();
+    document.getElementById('batchManagerSection').scrollIntoView({ behavior: 'smooth' });
 }
 
 // ==================== Preprocessing ====================
@@ -1362,10 +1448,29 @@ async function handleRunAnnotation() {
     const modelName = elements.celltypistModel.value;
     const majorityVoting = elements.majorityVoting.checked;
 
-    showLoading('Running CellTypist', `Annotating cell types with ${modelName.replace('.pkl', '')}...\nThis may take a few minutes (downloading model if first use).`);
+    showLoading('Running CellTypist', `Annotating cell types with ${modelName.replace('.pkl', '')}...\nThis may take a few minutes (downloading model if first use).`, { cancellable: true });
+
+    const abortController = new AbortController();
+    state.activeAbortController = abortController;
 
     try {
-        const result = await api.runAnnotation(state.fileId, modelName, majorityVoting);
+        const response = await fetch(`${api.baseUrl}/api/annotate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                file_id: state.fileId,
+                model: modelName,
+                majority_voting: majorityVoting
+            }),
+            signal: abortController.signal,
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'Annotation failed');
+        }
+
+        const result = await response.json();
         state.annotationResults = result.results;
         state.metadata = result.metadata;
 
@@ -1375,7 +1480,11 @@ async function handleRunAnnotation() {
         loadAnnotationColumns();
     } catch (error) {
         hideLoading();
-        showError(error.message);
+        if (error.name === 'AbortError') {
+            showError('Annotation cancelled.');
+        } else {
+            showError(error.message);
+        }
     }
 }
 
@@ -1512,7 +1621,10 @@ async function handleTrainModel() {
 
     if (!labelsColumn || !modelName) return;
 
-    showLoading('Training Model', `Training custom CellTypist model "${modelName}"...\nThis may take several minutes.`);
+    showLoading('Training Model', `Training custom CellTypist model "${modelName}"...\nThis may take several minutes.`, { cancellable: true });
+
+    const abortController = new AbortController();
+    state.activeAbortController = abortController;
 
     try {
         const params = {
@@ -1542,7 +1654,19 @@ async function handleTrainModel() {
             }
         }
 
-        const result = await api.trainModel(params);
+        const response = await fetch(`${api.baseUrl}/api/train-model`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params),
+            signal: abortController.signal,
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'Training failed');
+        }
+
+        const result = await response.json();
         hideLoading();
         displayTrainingResults(result.results);
 
@@ -1550,7 +1674,11 @@ async function handleTrainModel() {
         addCustomModelToDropdown(result.results.model_name);
     } catch (error) {
         hideLoading();
-        showError(error.message);
+        if (error.name === 'AbortError') {
+            showError('Model training cancelled.');
+        } else {
+            showError(error.message);
+        }
     }
 }
 
@@ -1649,10 +1777,30 @@ async function handleComputeUmap() {
     const nNeighbors = parseInt(document.getElementById('umapNNeighbors').value) || 15;
     const resolution = parseFloat(document.getElementById('umapResolution').value) || 1.0;
 
-    showLoading('Computing UMAP', 'Running dimensionality reduction and clustering...\nThis may take a minute for large datasets.');
+    showLoading('Computing UMAP', 'Running dimensionality reduction and clustering...\nThis may take a minute for large datasets.', { cancellable: true });
+
+    const abortController = new AbortController();
+    state.activeAbortController = abortController;
 
     try {
-        const result = await api.computeUmap(state.fileId, true, nNeighbors, resolution);
+        const response = await fetch(`${api.baseUrl}/api/umap`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                file_id: state.fileId,
+                force_recompute: true,
+                n_neighbors: nNeighbors,
+                resolution: resolution
+            }),
+            signal: abortController.signal,
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'UMAP computation failed');
+        }
+
+        const result = await response.json();
         state.umapData = result.results;
 
         hideLoading();
@@ -1662,7 +1810,11 @@ async function handleComputeUmap() {
         document.getElementById('reclusterResolution').value = resolution;
     } catch (error) {
         hideLoading();
-        showError(error.message);
+        if (error.name === 'AbortError') {
+            showError('UMAP computation cancelled.');
+        } else {
+            showError(error.message);
+        }
     }
 }
 
@@ -1838,6 +1990,16 @@ function handleUmapColorChange() {
 // ==================== Gene Expression Coloring ====================
 let geneSearchTimeout = null;
 
+function searchGenesLocal(query) {
+    // Client-side gene search using gene names from UMAP data
+    if (!state.umapData || !state.umapData.gene_names) return [];
+    const queryUpper = query.toUpperCase();
+    const genes = state.umapData.gene_names;
+    const prefix = genes.filter(g => g.toUpperCase().startsWith(queryUpper));
+    const substring = genes.filter(g => g.toUpperCase().includes(queryUpper) && !prefix.includes(g));
+    return prefix.concat(substring).slice(0, 20);
+}
+
 function handleGeneInputChange() {
     const query = elements.umapGeneInput.value.trim();
 
@@ -1850,6 +2012,13 @@ function handleGeneInputChange() {
 
     // Debounce: wait 200ms after typing stops
     geneSearchTimeout = setTimeout(async () => {
+        // Use client-side search if gene names are available (faster, works for merged files)
+        const localMatches = searchGenesLocal(query);
+        if (localMatches.length > 0) {
+            showGeneAutocomplete(localMatches);
+            return;
+        }
+        // Fall back to server-side search
         try {
             const result = await api.searchGenes(state.fileId, query);
             showGeneAutocomplete(result.genes);
@@ -2215,6 +2384,7 @@ function resetApplication() {
     state.projectId = null;
     state.samples = [];
     state.mergedFileId = null;
+    state.batchQcSampleId = null;
     state.integrationMethod = null;
     state.integrationStatus = null;
 
@@ -2359,35 +2529,45 @@ async function runSampleQcAndPreprocess(fileId) {
     const sample = state.samples.find(s => s.file_id === fileId);
     if (!sample) return;
 
+    // Enter batch QC mode: show interactive QC for this sample
+    state.batchQcSampleId = fileId;
+    // Temporarily set fileId so the QC UI operates on this sample
+    const prevFileId = state.fileId;
+    state.fileId = fileId;
+
     const row = document.querySelector(`[data-sample-file-id="${fileId}"]`);
     const statusCell = row ? row.querySelector('.batch-status-badge') : null;
-    if (statusCell) { statusCell.textContent = 'Running QC...'; statusCell.className = 'batch-status-badge badge badge-warning'; }
+    if (statusCell) { statusCell.textContent = 'Computing QC...'; statusCell.className = 'batch-status-badge badge badge-warning'; }
 
     try {
-        // QC metrics
-        await api.computeQcMetrics(fileId);
-        if (statusCell) { statusCell.textContent = 'Filtering...'; }
+        // Compute QC metrics
+        const qcResult = await api.computeQcMetrics(fileId);
+        state.qcPlotData = qcResult.plot_data;
 
-        // Apply default QC filters
-        const filterResult = await api.applyQcFilter({
-            file_id: fileId,
-            min_genes: 250,
-            min_counts: 500,
-            max_pct_mt: 20.0,
-            max_pct_ribo: 50.0,
-            min_cells_per_gene: 3
-        });
+        // Get metadata for this sample
+        const metadata = await api.getMetadata(fileId);
+        state.metadata = metadata;
 
-        if (statusCell) { statusCell.textContent = 'Preprocessing...'; }
+        // Hide filter results from any previous QC run
+        elements.filterResultsSection.hidden = true;
 
-        // Preprocess
-        await api.runPreprocess(fileId);
+        // Show the QC visualization section
+        showQcVisualization(qcResult);
 
-        sample.status = 'preprocessed';
-        sample.n_cells = filterResult.summary.n_cells_after;
-        renderBatchSampleTable();
-        updateBatchMergeButton();
+        // Add a banner showing which sample is being QC'd
+        let batchQcBanner = document.getElementById('batchQcBanner');
+        if (!batchQcBanner) {
+            batchQcBanner = document.createElement('div');
+            batchQcBanner.id = 'batchQcBanner';
+            batchQcBanner.className = 'batch-qc-banner';
+            elements.qcVisualizationSection.querySelector('.step-header').after(batchQcBanner);
+        }
+        batchQcBanner.innerHTML = `<strong>Batch QC:</strong> ${sample.filename} (${sample.batch_label})`;
+        batchQcBanner.hidden = false;
+
     } catch (err) {
+        state.batchQcSampleId = null;
+        state.fileId = prevFileId;
         sample.status = 'error';
         renderBatchSampleTable();
         showError(`QC failed for ${sample.filename}: ${err.message}`);
@@ -2564,6 +2744,39 @@ function handleSkipIntegration() {
     // Use merged file without integration
     state.fileId = state.mergedFileId;
     proceedAfterIntegration();
+}
+
+async function handleCancelIntegration() {
+    if (!state.projectId) return;
+
+    try {
+        await api.cancelIntegration(state.projectId);
+    } catch (e) {
+        // Ignore cancel errors
+    }
+
+    // Stop polling
+    if (state.integrationPollTimer) {
+        clearInterval(state.integrationPollTimer);
+        state.integrationPollTimer = null;
+    }
+
+    // Reset UI
+    document.getElementById('integrationProgress').hidden = true;
+    document.getElementById('runIntegrationBtn').disabled = false;
+    state.integrationStatus = null;
+    showError('Integration cancelled.');
+}
+
+function handleLoadingCancel() {
+    // Abort the in-flight fetch request
+    if (state.activeAbortController) {
+        state.activeAbortController.abort();
+    }
+    // Also try to cancel the backend task
+    if (state.activeTaskId) {
+        api.cancelTask(state.activeTaskId).catch(() => {});
+    }
 }
 
 function proceedAfterIntegration() {
@@ -2754,11 +2967,15 @@ async function init() {
     document.getElementById('batchMergeBtn').addEventListener('click', handleMergeSamples);
     document.getElementById('runIntegrationBtn').addEventListener('click', handleRunIntegration);
     document.getElementById('skipIntegrationBtn').addEventListener('click', handleSkipIntegration);
+    document.getElementById('cancelIntegrationBtn').addEventListener('click', handleCancelIntegration);
 
     // Integration method change
     document.querySelectorAll('input[name="integrationMethod"]').forEach(radio => {
         radio.addEventListener('change', handleIntegrationMethodChange);
     });
+
+    // Loading overlay cancel button
+    document.getElementById('loadingCancelBtn').addEventListener('click', handleLoadingCancel);
 }
 
 // Clean up uploads when user leaves the page

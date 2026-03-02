@@ -1169,7 +1169,8 @@ def integrate_project(project_id):
     # Check if integration already running
     if project_id in integration_threads:
         thread_info = integration_threads[project_id]
-        if thread_info.get('thread') and thread_info['thread'].is_alive():
+        if (thread_info.get('thread') and thread_info['thread'].is_alive()
+                and not thread_info.get('cancel')):
             return jsonify({'error': 'Integration already running'}), 409
 
     # Initialize status
@@ -1181,6 +1182,7 @@ def integrate_project(project_id):
         'error': None,
         'result': None,
         'thread': None,
+        'cancel': False,
     }
 
     def run_integration():
@@ -1193,6 +1195,9 @@ def integrate_project(project_id):
             status['progress'] = 10
             status['message'] = 'Data loaded, running integration...'
 
+            if status.get('cancel'):
+                return
+
             if method == 'scanorama':
                 from utils.integration import run_scanorama_integration
                 from utils.metadata import is_log_normalized
@@ -1202,16 +1207,23 @@ def integrate_project(project_id):
                     sc.pp.normalize_total(adata, target_sum=1e4)
                     sc.pp.log1p(adata)
                 status['progress'] = 30
+                if status.get('cancel'):
+                    return
                 result = run_scanorama_integration(adata)
             elif method == 'scvi':
                 from utils.integration import run_scvi_integration
                 status['progress'] = 20
                 status['message'] = 'Training scVI model...'
+                if status.get('cancel'):
+                    return
                 result = run_scvi_integration(
                     adata, n_latent=n_latent, max_epochs=max_epochs
                 )
             else:
                 raise ValueError(f'Unknown integration method: {method}')
+
+            if status.get('cancel'):
+                return
 
             status['progress'] = 90
             status['message'] = 'Saving results...'
@@ -1269,6 +1281,40 @@ def get_integration_status(project_id):
         response['error'] = info['error']
 
     return jsonify(response)
+
+
+@app.route('/api/project/<project_id>/cancel-integration', methods=['POST'])
+def cancel_integration(project_id):
+    """Cancel a running integration task"""
+    if project_id not in integration_threads:
+        return jsonify({'error': 'No integration running'}), 404
+
+    info = integration_threads[project_id]
+    if info['status'] != 'running':
+        return jsonify({'error': 'Integration is not running'}), 400
+
+    # Set cancel flag — the thread checks this
+    info['cancel'] = True
+    info['status'] = 'cancelled'
+    info['message'] = 'Cancelled by user'
+
+    if project_id in project_store:
+        project_store[project_id]['integration_status'] = 'cancelled'
+
+    return jsonify({'success': True, 'message': 'Integration cancelled'})
+
+
+# In-flight task cancellation for synchronous endpoints (CellTypist training/annotation)
+active_tasks = {}  # task_id -> threading.Event (set = cancelled)
+
+
+@app.route('/api/cancel-task/<task_id>', methods=['POST'])
+def cancel_task(task_id):
+    """Cancel a long-running synchronous task by setting its cancel event"""
+    if task_id in active_tasks:
+        active_tasks[task_id].set()
+        return jsonify({'success': True, 'message': 'Task cancellation requested'})
+    return jsonify({'error': 'Task not found'}), 404
 
 
 # ============== Main ==============
